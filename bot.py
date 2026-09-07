@@ -15,7 +15,7 @@ import yt_dlp
 TOKEN = os.getenv("BOT_TOKEN")
 
 # Guarda quais usuários já têm um download em andamento
-usuarios_ocupados = set()
+usuarios_ocupados = {}
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -50,14 +50,22 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Anti-spam: impede o mesmo usuário de iniciar vários downloads ao mesmo tempo
-    if user_id in usuarios_ocupados:
-        await update.message.reply_text(
-            "⏳ Você já tem um vídeo sendo processado. Aguarde terminar."
-        )
-        return
+    # Anti-spam com desbloqueio automático após 5 minutos
+    agora = asyncio.get_running_loop().time()
+    bloqueio = usuarios_ocupados.get(user_id)
 
-    usuarios_ocupados.add(user_id)
+    if bloqueio:
+        _, inicio = bloqueio
+
+        if agora - inicio < 300:
+            await update.message.reply_text(
+                "⏳ Você já tem um vídeo sendo processado. Aguarde terminar."
+            )
+            return
+
+    # Identificador exclusivo deste processamento
+    request_token = object()
+    usuarios_ocupados[user_id] = (request_token, agora)
 
     status_msg = await update.message.reply_text(
         "⏳ Processando vídeo... aguarde."
@@ -125,7 +133,10 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print(f"Erro ao limpar arquivos temporários: {e}")
 
-        usuarios_ocupados.discard(user_id)
+        # Só libera o bloqueio se ele ainda pertence a este processamento
+        bloqueio_atual = usuarios_ocupados.get(user_id)
+        if bloqueio_atual and bloqueio_atual[0] is request_token:
+            usuarios_ocupados.pop(user_id, None)
 
 
 if __name__ == "__main__":
