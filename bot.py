@@ -151,7 +151,6 @@ async def meu_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"🆔 Seu Telegram User ID é: {update.effective_user.id}"
     )
-l
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🌍 Escolha o seu idioma / Choose your language:",
