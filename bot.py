@@ -2,7 +2,7 @@ import os
 import asyncio
 import tempfile
 import shutil
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
@@ -106,6 +106,15 @@ TEXTOS = {
 
 
 def teclado_idiomas():
+    return ReplyKeyboardMarkup(
+        [
+            ["🇵🇹 Português", "🇬🇧 English"],
+            ["🇫🇷 Français", "🇪🇸 Español"],
+            ["🇮🇳 हिन्दी", "🇸🇦 العربية"]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🇵🇹 Português", callback_data="lang_pt"),
@@ -141,19 +150,28 @@ async def language(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def selecionar_idioma(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+    escolha = update.message.text
+    user_id = update.effective_user.id
 
-    idioma = query.data.replace("lang_", "")
-    user_id = query.from_user.id
+    idiomas = {
+        "🇵🇹 Português": "pt",
+        "🇬🇧 English": "en",
+        "🇫🇷 Français": "fr",
+        "🇪🇸 Español": "es",
+        "🇮🇳 हिन्दी": "hi",
+        "🇸🇦 العربية": "ar"
+    }
 
-    if idioma not in TEXTOS:
+    idioma = idiomas.get(escolha)
+
+    if not idioma:
         return
 
     idiomas_usuarios[user_id] = idioma
 
-    await query.edit_message_text(
-        TEXTOS[idioma]["welcome"]
+    await update.message.reply_text(
+        TEXTOS[idioma]["welcome"],
+        reply_markup=ReplyKeyboardRemove()
     )
 
 
@@ -263,9 +281,9 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("language", language))
 
     app.add_handler(
-        CallbackQueryHandler(
-            selecionar_idioma,
-            pattern="^lang_"
+        MessageHandler(
+            filters.Regex(r"^(🇵🇹 Português|🇬🇧 English|🇫🇷 Français|🇪🇸 Español|🇮🇳 हिन्दी|🇸🇦 العربية)$"),
+            selecionar_idioma
         )
     )
 
@@ -278,4 +296,5 @@ if __name__ == "__main__":
 
     print("Bot rodando...")
     app.run_polling()
+
 
