@@ -147,6 +147,11 @@ async def configurar_menu(app):
 
     await app.bot.set_my_commands(comandos)
 
+async def meu_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        f"🆔 Seu Telegram User ID é: {update.effective_user.id}"
+    )
+l
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🌍 Escolha o seu idioma / Choose your language:",
@@ -291,6 +296,7 @@ if __name__ == "__main__":
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("language", language))
+    app.add_handler(CommandHandler("meuid", meu_id))
 
     app.add_handler(
         MessageHandler(
@@ -308,5 +314,6 @@ if __name__ == "__main__":
 
     print("Bot rodando...")
     app.run_polling()
+
 
 
