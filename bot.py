@@ -268,7 +268,10 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption=t["caption"]
             )
 
-        await status_msg.delete()
+        try:
+            await status_msg.delete()
+        except Exception as e:
+            print(f"Erro ao apagar mensagem de status: {e}")
 
     except yt_dlp.utils.DownloadError as e:
         print(f"Erro yt-dlp: {e}")
