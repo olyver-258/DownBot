@@ -19,6 +19,7 @@ from telegram.ext import (
 import yt_dlp
 
 TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 usuarios_ocupados = {}
 idiomas_usuarios = {}
@@ -146,6 +147,16 @@ async def configurar_menu(app):
     ]
 
     await app.bot.set_my_commands(comandos)
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Somente o administrador pode usar este comando
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    await update.message.reply_text(
+        "📊 Estatísticas do bot\n\n"
+        f"👥 Usuários nesta sessão: {len(idiomas_usuarios)}"
+    )
 
 async def meu_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -296,7 +307,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("language", language))
     app.add_handler(CommandHandler("meuid", meu_id))
-
+    app.add_handler(CommandHandler("stats", stats))
     app.add_handler(
         MessageHandler(
             filters.Regex(r"^(🇵🇹 Português|🇬🇧 English|🇫🇷 Français|🇪🇸 Español|🇮🇳 हिन्दी|🇸🇦 العربية)$"),
