@@ -2,13 +2,18 @@ import os
 import asyncio
 import tempfile
 import shutil
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from telegram import (
+    Update,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardRemove,
+    BotCommand
+)
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
     CommandHandler,
     MessageHandler,
-    CallbackQueryHandler,
     filters
 )
 import yt_dlp
@@ -134,6 +139,13 @@ def teclado_idiomas():
 def obter_idioma(user_id):
     return idiomas_usuarios.get(user_id, "pt")
 
+async def configurar_menu(app):
+    comandos = [
+        BotCommand("start", "🚀 Iniciar o bot"),
+        BotCommand("language", "🌍 Mudar idioma"),
+    ]
+
+    await app.bot.set_my_commands(comandos)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -275,7 +287,7 @@ if __name__ == "__main__":
     if not TOKEN:
         raise RuntimeError("BOT_TOKEN não configurado.")
 
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = ApplicationBuilder().token(TOKEN).post_init(configurar_menu).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("language", language))
