@@ -13,7 +13,7 @@ YDL_OPTIONS = {
     'quiet': True,
     'no_warnings': True,
     'outtmpl': 'downloaded_%(id)s.%(ext)s',
-
+}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Olá! Me envie um link do Instagram ou TikTok e eu baixo o vídeo para você.")
