@@ -148,6 +148,29 @@ async def configurar_menu(app):
 
     await app.bot.set_my_commands(comandos)
 
+async def manutencao(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    enviados = 0
+    falhas = 0
+
+    for user_id in list(idiomas_usuarios.keys()):
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text="🛠️ O bot está em manutenção para melhorias e correções. Voltaremos em breve! 🚀"
+            )
+            enviados += 1
+        except Exception as e:
+            print(f"Erro ao avisar {user_id}: {e}")
+            falhas += 1
+
+    await update.message.reply_text(
+        f"📢 Aviso enviado!\n✅ Enviados: {enviados}\n❌ Falhas: {falhas}"
+    )
+
+
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Somente o administrador pode usar este comando
     if update.effective_user.id != ADMIN_ID:
@@ -311,6 +334,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("language", language))
     app.add_handler(CommandHandler("meuid", meu_id))
     app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("manutencao", manutencao))
     app.add_handler(
         MessageHandler(
             filters.Regex(r"^(🇵🇹 Português|🇬🇧 English|🇫🇷 Français|🇪🇸 Español|🇮🇳 हिन्दी|🇸🇦 العربية)$"),
