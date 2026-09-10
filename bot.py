@@ -405,10 +405,11 @@ def identificar_plataforma(url):
 def baixar_video(url, pasta_temp):
     ydl_options = {
         # Tenta priorizar MP4 sem exigir merge com ffmpeg.
-        "format": "best[ext=mp4]/best",
+        "format": "best[ext=mp4]/best",  
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
+        "extractor_args": {"youtube": {"player_client": ["web_embedded"]}},
         "socket_timeout": 30,
         "retries": 3,
         "fragment_retries": 3,
