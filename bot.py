@@ -49,10 +49,10 @@ TEXTOS = {
         "start": "🌍 Escolha o seu idioma:",
         "welcome": (
             "✅ Idioma definido para Português.\n\n"
-            "Envie um link do Instagram, TikTok ou YouTube."
+            "Envie um link do Instagram, TikTok ou Facebook e Twitter/X."
         ),
         "invalid": (
-            "❌ Envie um link válido do Instagram, TikTok ou YouTube."
+            "❌ Envie um link válido do Instagram, TikTok ou Facebook e Twitter/X."
         ),
         "busy": (
             "⏳ Você já tem um vídeo sendo processado. Aguarde terminar."
@@ -81,10 +81,10 @@ TEXTOS = {
         "start": "🌍 Choose your language:",
         "welcome": (
             "✅ Language set to English.\n\n"
-            "Send an Instagram, TikTok or YouTube link."
+            "Send an Instagram, TikTok or Facebook e Twitter/X link."
         ),
         "invalid": (
-            "❌ Send a valid Instagram, TikTok or YouTube link."
+            "❌ Send a valid Instagram, TikTok or Facebook e Twitter/X link."
         ),
         "busy": (
             "⏳ You already have a video being processed. Please wait."
@@ -113,10 +113,10 @@ TEXTOS = {
         "start": "🌍 Choisissez votre langue :",
         "welcome": (
             "✅ Langue définie sur Français.\n\n"
-            "Envoyez un lien Instagram, TikTok ou YouTube."
+            "Envoyez un lien Instagram, TikTok ou Facebook e Twitter/X."
         ),
         "invalid": (
-            "❌ Envoyez un lien Instagram, TikTok ou YouTube valide."
+            "❌ Envoyez un lien Instagram, TikTok ou Facebook e Twitter/X valide."
         ),
         "busy": (
             "⏳ Une vidéo est déjà en cours de traitement. Veuillez patienter."
@@ -147,10 +147,10 @@ TEXTOS = {
         "start": "🌍 Elige tu idioma:",
         "welcome": (
             "✅ Idioma configurado en Español.\n\n"
-            "Envía un enlace de Instagram, TikTok o YouTube."
+            "Envía un enlace de Instagram, TikTok o Facebook e Twitter/X."
         ),
         "invalid": (
-            "❌ Envía un enlace válido de Instagram, TikTok o YouTube."
+            "❌ Envía un enlace válido de Instagram, TikTok o Facebook e Twitter/X."
         ),
         "busy": (
             "⏳ Ya tienes un video en proceso. Espera a que termine."
@@ -180,10 +180,10 @@ TEXTOS = {
         "start": "🌍 अपनी भाषा चुनें:",
         "welcome": (
             "✅ भाषा हिन्दी पर सेट कर दी गई है।\n\n"
-            "Instagram, TikTok या YouTube लिंक भेजें।"
+            "Instagram, TikTok या Facebook e Twitter/X लिंक भेजें।"
         ),
         "invalid": (
-            "❌ कृपया एक मान्य Instagram, TikTok या YouTube लिंक भेजें।"
+            "❌ कृपया एक मान्य Instagram, TikTok या Facebook e Twitter/X लिंक भेजें।"
         ),
         "busy": (
             "⏳ आपका एक वीडियो पहले से प्रोसेस हो रहा है। कृपया प्रतीक्षा करें।"
@@ -211,10 +211,10 @@ TEXTOS = {
         "start": "🌍 اختر لغتك:",
         "welcome": (
             "✅ تم اختيار اللغة العربية.\n\n"
-            "أرسل رابط Instagram أو TikTok أو YouTube."
+            "أرسل رابط Instagram أو TikTok أو Facebook e Twitter/X."
         ),
         "invalid": (
-            "❌ أرسل رابط Instagram أو TikTok أو YouTube صالحًا."
+            "❌ أرسل رابط Instagram أو TikTok أو Facebook e Twitter/X صالحًا."
         ),
         "busy": (
             "⏳ لديك فيديو قيد المعالجة بالفعل. يرجى الانتظار."
@@ -392,8 +392,11 @@ def identificar_plataforma(url):
     if "tiktok.com" in url:
         return "tiktok"
 
-    if "youtube.com" in url or "youtu.be" in url:
-        return "youtube"
+    if "facebook.com" in url or "fb.watch" in url:
+        return "facebook"
+
+    if "twitter.com" in url or "x.com" in url:
+        return "twitter"
 
     return None
 
@@ -409,7 +412,6 @@ def baixar_video(url, pasta_temp):
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "extractor_args": {"youtube": {"player_client": ["default", "web_embedded"]}},
         "socket_timeout": 30,
         "retries": 3,
         "fragment_retries": 3,
@@ -667,7 +669,7 @@ if __name__ == "__main__":
     )
 
     print("Bot rodando...")
-    print("Plataformas: Instagram | TikTok | YouTube")
+    print("Plataformas: Instagram | TikTok | Facebook | Twitter/X")
 
     app.run_polling(
         drop_pending_updates=True
