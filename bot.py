@@ -11,6 +11,7 @@ from telegram import (
     ReplyKeyboardRemove,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    ReactionTypeEmoji,
     BotCommand,
 )
 from telegram.ext import (
@@ -685,7 +686,7 @@ async def download_video(
 
         # Reage ao link original quando o envio terminar com sucesso.
         try:
-            await update.message.set_reaction("✅")
+            await update.message.set_reaction(ReactionTypeEmoji("✅"))
         except Exception as e:
             print(f"Erro ao adicionar reação de sucesso: {e}")
 
@@ -731,7 +732,7 @@ async def download_video(
             return
 
         try:
-            await update.message.set_reaction("❎")
+            await update.message.set_reaction(ReactionTypeEmoji("❎"))
         except Exception as erro_reacao:
             print(f"Erro ao adicionar reação de erro: {erro_reacao}")
 
@@ -769,7 +770,7 @@ async def download_video(
 
         if not video_enviado:
             try:
-                await update.message.set_reaction("❎")
+                await update.message.set_reaction(ReactionTypeEmoji("❎"))
             except Exception as erro_reacao:
                 print(
                     f"Erro ao adicionar reação de erro: "
