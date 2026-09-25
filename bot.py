@@ -546,7 +546,11 @@ LEGENDA ORIGINAL:
                 )
 
             # Remove o botão da mensagem original sem alterar a legenda.
-            await query.edit_message_reply_markup(reply_markup=None)
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception as e:
+                if "message is not modified" not in str(e).lower():
+                    raise
 
             # Envia primeiro a legenda recriada.
             await context.bot.send_message(
