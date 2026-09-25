@@ -9,6 +9,8 @@ from telegram import (
     Update,
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
     BotCommand,
 )
 from telegram.ext import (
@@ -16,10 +18,12 @@ from telegram.ext import (
     ContextTypes,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     filters,
 )
 
 import yt_dlp
+from google import genai
 
 
 # =========================================================
@@ -28,6 +32,13 @@ import yt_dlp
 
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+gemini_client = (
+    genai.Client(api_key=GEMINI_API_KEY)
+    if GEMINI_API_KEY
+    else None
+)
 
 # Telegram Bot API normalmente limita uploads de bots.
 # Mantemos margem de segurança.
@@ -36,8 +47,10 @@ MAX_FILE_SIZE = 49 * 1024 * 1024
 # user_id -> (token_da_requisicao, horario_inicio)
 usuarios_ocupados = {}
 
-# user_id -> idioma
+idiomas_usuarios = {}# user_id -> idioma
 idiomas_usuarios = {}
+# Legenda original aguardando recriação pelo admin
+legendas_para_recriar = {}
 
 
 # =========================================================
@@ -455,6 +468,83 @@ def baixar_video(url, pasta_temp):
 # RECEBER E PROCESSAR LINK
 # =========================================================
 
+async def recriar_legenda(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    # Segurança: somente o administrador pode usar a IA
+    if update.effective_user.id != ADMIN_ID:
+        await query.answer(
+            "Esta função é privada.",
+            show_alert=True,
+        )
+        return
+
+    legenda_original = legendas_para_recriar.get(
+        update.effective_user.id
+    )
+
+    if not legenda_original:
+        await query.edit_message_text(
+            "❌ Não encontrei uma legenda para recriar."
+        )
+        return
+
+    if not gemini_client:
+        await query.edit_message_text(
+            "❌ Gemini não está configurado."
+        )
+        return
+
+    await query.edit_message_text(
+        "✨ Recriando legenda..."
+    )
+
+    prompt = f"""Reescreva a legenda abaixo em português natural e fluido.
+
+Regras:
+- Não faça uma simples paráfrase palavra por palavra.
+- O resultado não deve parecer uma cópia do texto original.
+- Preserve os fatos, nomes e informações importantes.
+- Não invente informações.
+- Mantenha aproximadamente o mesmo nível de detalhe.
+- Adapte expressões para uma linguagem natural de redes sociais.
+- Não explique o que você fez.
+- Responda somente com a nova legenda.
+
+LEGENDA ORIGINAL:
+{legenda_original}
+"""
+
+    try:
+        resposta = await asyncio.to_thread(
+            gemini_client.models.generate_content,
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
+
+        nova_legenda = resposta.text
+
+        if not nova_legenda:
+            raise ValueError("Gemini retornou uma resposta vazia.")
+
+        await query.edit_message_text(
+            "✨ Legenda recriada:"
+        )
+
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=nova_legenda,
+        )
+
+    except Exception as e:
+        print(f"Erro Gemini: {e}")
+
+        await query.edit_message_text(
+            "❌ Não consegui recriar a legenda. Tente novamente."
+        )
+
+
 async def download_video(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -556,6 +646,23 @@ async def download_video(
 
         # Só marcamos como enviado depois que o Telegram confirmou o envio.
         video_enviado = True
+        # Guarda a legenda e mostra o botão de IA somente para o admin
+        if update.effective_user.id == ADMIN_ID and legenda:
+            legendas_para_recriar[update.effective_user.id] = legenda
+
+            teclado_ia = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "✨ Recriar legenda",
+                        callback_data="recriar_legenda"
+                    )
+                ]
+            ])
+
+            await update.message.reply_text(
+                "Quer recriar a legenda deste vídeo?",
+                reply_markup=teclado_ia,
+            )
 
         if legenda and len(legenda) > 1024:
             await update.message.reply_text(legenda)
@@ -669,6 +776,13 @@ if __name__ == "__main__":
                 r"🇪🇸 Español|🇮🇳 हिन्दी|🇸🇦 العربية)$"
             ),
             selecionar_idioma,
+        )
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(
+            recriar_legenda,
+            pattern=r"^recriar_legenda$",
         )
     )
 

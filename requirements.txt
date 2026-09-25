@@ -7,3 +7,4 @@ idna==3.19
 python-telegram-bot==22.8
 typing_extensions==4.16.0
 yt-dlp==2026.8.19
+google-genai
