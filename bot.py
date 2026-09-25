@@ -534,7 +534,7 @@ LEGENDA ORIGINAL:
         try:
             resposta = await asyncio.to_thread(
                 gemini_client.models.generate_content,
-                model="gemini-3.8-flash",
+                model="gemini-3.1-flash-lite",
                 contents=prompt,
             )
 
