@@ -682,7 +682,16 @@ async def download_video(
 
         # Só marcamos como enviado depois que o Telegram confirmou o envio.
         video_enviado = True
-        # Guarda a legenda e mostra o botão de IA somente para o admin
+
+        # Reage ao link original quando o envio terminar com sucesso.
+        try:
+            await update.message.set_reaction("✅")
+        except Exception as e:
+            print(f"Erro ao adicionar reação de sucesso: {e}")
+
+        # Botão privado de recriação para o administrador.
+        teclado_ia = None
+
         if update.effective_user.id == ADMIN_ID and legenda:
             legendas_para_recriar[update.effective_user.id] = legenda
 
@@ -690,18 +699,24 @@ async def download_video(
                 [
                     InlineKeyboardButton(
                         "✨ Recriar legenda",
-                        callback_data="recriar_legenda"
+                        callback_data="recriar_legenda",
                     )
                 ]
             ])
 
+        # Legendas maiores que 1024 caracteres são enviadas separadamente.
+        if legenda and len(legenda) > 1024:
             await update.message.reply_text(
-                "Quer recriar a legenda deste vídeo?",
+                legenda,
                 reply_markup=teclado_ia,
             )
 
-        if legenda and len(legenda) > 1024:
-            await update.message.reply_text(legenda)
+        # Se a legenda já coube no vídeo, envia somente o botão abaixo.
+        elif teclado_ia:
+            await update.message.reply_text(
+                "✨",
+                reply_markup=teclado_ia,
+            )
 
         try:
             await status_msg.delete()
@@ -711,9 +726,14 @@ async def download_video(
     except yt_dlp.utils.DownloadError as e:
         print(f"Erro yt-dlp [{plataforma}]: {e}")
 
-        # Evita o falso erro caso o arquivo já tenha sido enviado.
+        # Evita falso erro caso o vídeo já tenha sido enviado.
         if video_enviado:
             return
+
+        try:
+            await update.message.set_reaction("❎")
+        except Exception as erro_reacao:
+            print(f"Erro ao adicionar reação de erro: {erro_reacao}")
 
         erro = str(e).lower()
 
@@ -747,9 +767,15 @@ async def download_video(
             f"{type(e).__name__}: {e}"
         )
 
-        # Correção do problema antigo:
-        # se o vídeo já foi enviado, não mostra uma mensagem de erro depois.
         if not video_enviado:
+            try:
+                await update.message.set_reaction("❎")
+            except Exception as erro_reacao:
+                print(
+                    f"Erro ao adicionar reação de erro: "
+                    f"{erro_reacao}"
+                )
+
             try:
                 await status_msg.edit_text(t["unexpected"])
             except Exception:
