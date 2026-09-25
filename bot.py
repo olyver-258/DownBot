@@ -564,6 +564,12 @@ LEGENDA ORIGINAL:
                 text="✨ Legenda recriada:",
             )
 
+            # Apaga a mensagem temporária "Recriando legenda..."
+            try:
+                await query.message.delete()
+            except Exception as e:
+                print(f"Erro ao apagar mensagem de processamento: {e}")
+
             return
 
         except Exception as e:
