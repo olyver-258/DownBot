@@ -545,13 +545,19 @@ LEGENDA ORIGINAL:
                     "Gemini retornou uma resposta vazia."
                 )
 
-            await query.edit_message_text(
-                "✨ Legenda recriada:"
-            )
+            # Remove o botão da mensagem original sem alterar a legenda.
+            await query.edit_message_reply_markup(reply_markup=None)
 
+            # Envia primeiro a legenda recriada.
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=nova_legenda,
+            )
+
+            # Confirmação fica por baixo da nova legenda.
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="✨ Legenda recriada:",
             )
 
             return
