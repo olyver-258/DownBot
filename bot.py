@@ -427,9 +427,11 @@ def baixar_video(url, pasta_temp):
         info = ydl.extract_info(url, download=True)
         filename = ydl.prepare_filename(info)
 
+    legenda = info.get("description") or info.get("title") or ""
+
     # Caminho previsto pelo yt-dlp.
     if filename and os.path.exists(filename):
-        return filename
+        return filename, legenda
 
     # Alguns sites podem alterar nome/extensão final.
     arquivos = [
@@ -442,7 +444,7 @@ def baixar_video(url, pasta_temp):
     if arquivos:
         # Se houver mais de um, usa o maior arquivo real.
         maior = max(arquivos, key=lambda p: p.stat().st_size)
-        return str(maior)
+        return str(maior), legenda
 
     raise FileNotFoundError(
         "Download concluído, mas nenhum arquivo final foi encontrado."
@@ -495,11 +497,17 @@ async def download_video(
     try:
         loop = asyncio.get_running_loop()
 
-        filename = await loop.run_in_executor(
+        filename, legenda = await loop.run_in_executor(
             None,
             baixar_video,
             url,
             pasta_temp,
+        )
+
+        caption_envio = (
+            legenda
+            if legenda and len(legenda) <= 1024
+            else t["caption"]
         )
 
         if not os.path.exists(filename):
@@ -519,7 +527,7 @@ async def download_video(
             try:
                 await update.message.reply_video(
                     video=video_file,
-                    caption=t["caption"],
+                    caption=caption_envio,
                     supports_streaming=True,
                     read_timeout=120,
                     write_timeout=120,
@@ -539,7 +547,7 @@ async def download_video(
 
                 await update.message.reply_document(
                     document=video_file,
-                    caption=t["caption"],
+                    caption=caption_envio,
                     read_timeout=120,
                     write_timeout=120,
                     connect_timeout=60,
@@ -548,6 +556,9 @@ async def download_video(
 
         # Só marcamos como enviado depois que o Telegram confirmou o envio.
         video_enviado = True
+
+        if legenda and len(legenda) > 1024:
+            await update.message.reply_text(legenda)
 
         try:
             await status_msg.delete()
