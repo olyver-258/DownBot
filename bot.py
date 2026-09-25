@@ -72,7 +72,7 @@ TEXTOS = {
         ),
         "processing": "⏳ Processando vídeo... aguarde.",
         "sending": "📤 Enviando vídeo...",
-        "caption": "✅ Aqui está seu vídeo!",
+        "caption": "✅ AQUI ESTÁ O SEU VÍDEO! 😃",
         "private": (
             "🔒 Não consegui acessar esse vídeo.\n\n"
             "Ele pode estar privado, removido, indisponível ou exigir login."
@@ -104,7 +104,7 @@ TEXTOS = {
         ),
         "processing": "⏳ Processing video... please wait.",
         "sending": "📤 Sending video...",
-        "caption": "✅ Here is your video!",
+        "caption": "✅ HERE IS YOUR VIDEO! 😃",
         "private": (
             "🔒 I couldn't access this video.\n\n"
             "It may be private, removed, unavailable, or require login."
@@ -136,7 +136,7 @@ TEXTOS = {
         ),
         "processing": "⏳ Traitement de la vidéo... veuillez patienter.",
         "sending": "📤 Envoi de la vidéo...",
-        "caption": "✅ Voici votre vidéo !",
+        "caption": "✅ VOICI VOTRE VIDÉO ! 😃",
         "private": (
             "🔒 Je n'ai pas pu accéder à cette vidéo.\n\n"
             "Elle peut être privée, supprimée, indisponible "
@@ -170,7 +170,7 @@ TEXTOS = {
         ),
         "processing": "⏳ Procesando video... espera.",
         "sending": "📤 Enviando video...",
-        "caption": "✅ ¡Aquí está tu video!",
+        "caption": "✅ ¡AQUÍ ESTÁ TU VIDEO! 😃",
         "private": (
             "🔒 No pude acceder a este video.\n\n"
             "Puede ser privado, eliminado, no disponible "
@@ -203,7 +203,7 @@ TEXTOS = {
         ),
         "processing": "⏳ वीडियो प्रोसेस हो रहा है... कृपया प्रतीक्षा करें।",
         "sending": "📤 वीडियो भेजा जा रहा है...",
-        "caption": "✅ आपका वीडियो यहाँ है!",
+        "caption": "✅ आपका वीडियो यहाँ है! 😃",
         "private": (
             "🔒 मैं इस वीडियो तक पहुँच नहीं सका।\n\n"
             "यह निजी, हटाया गया, अनुपलब्ध या लॉगिन की आवश्यकता वाला हो सकता है।"
@@ -234,7 +234,7 @@ TEXTOS = {
         ),
         "processing": "⏳ جارٍ معالجة الفيديو... يرجى الانتظار.",
         "sending": "📤 جارٍ إرسال الفيديو...",
-        "caption": "✅ إليك الفيديو!",
+        "caption": "✅ إليك الفيديو! 😃",
         "private": (
             "🔒 لم أتمكن من الوصول إلى هذا الفيديو.\n\n"
             "قد يكون خاصًا أو محذوفًا أو غير متاح أو يتطلب تسجيل الدخول."
@@ -649,6 +649,7 @@ async def download_video(
             try:
                 await update.message.reply_video(
                     video=video_file,
+                    caption=t["caption"],
                     supports_streaming=True,
                     read_timeout=120,
                     write_timeout=120,
@@ -668,6 +669,7 @@ async def download_video(
 
                 await update.message.reply_document(
                     document=video_file,
+                    caption=t["caption"],
                     read_timeout=120,
                     write_timeout=120,
                     connect_timeout=60,
@@ -693,8 +695,8 @@ async def download_video(
                 ]
             ])
 
-        # A legenda original é sempre enviada separadamente do vídeo.
-        if legenda:
+        # A legenda original e a IA são exclusivas do administrador.
+        if update.effective_user.id == ADMIN_ID and legenda:
             await update.message.reply_text(
                 legenda,
                 reply_markup=teclado_ia,
