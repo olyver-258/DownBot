@@ -11,7 +11,6 @@ from telegram import (
     ReplyKeyboardRemove,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    ReactionTypeEmoji,
     BotCommand,
 )
 from telegram.ext import (
@@ -631,11 +630,7 @@ async def download_video(
             pasta_temp,
         )
 
-        caption_envio = (
-            legenda
-            if legenda and len(legenda) <= 1024
-            else t["caption"]
-        )
+        # A legenda original é sempre enviada separadamente.
 
         if not os.path.exists(filename):
             raise FileNotFoundError(
@@ -654,7 +649,6 @@ async def download_video(
             try:
                 await update.message.reply_video(
                     video=video_file,
-                    caption=caption_envio,
                     supports_streaming=True,
                     read_timeout=120,
                     write_timeout=120,
@@ -674,7 +668,6 @@ async def download_video(
 
                 await update.message.reply_document(
                     document=video_file,
-                    caption=caption_envio,
                     read_timeout=120,
                     write_timeout=120,
                     connect_timeout=60,
@@ -684,13 +677,8 @@ async def download_video(
         # Só marcamos como enviado depois que o Telegram confirmou o envio.
         video_enviado = True
 
-        # Reage ao link original quando o envio terminar com sucesso.
-        try:
-            await update.message.set_reaction(ReactionTypeEmoji("✅"))
-        except Exception as e:
-            print(f"Erro ao adicionar reação de sucesso: {e}")
-
-        # Botão privado de recriação para o administrador.
+        
+        # Prepara o botão privado de IA somente para o administrador.
         teclado_ia = None
 
         if update.effective_user.id == ADMIN_ID and legenda:
@@ -705,17 +693,10 @@ async def download_video(
                 ]
             ])
 
-        # Legendas maiores que 1024 caracteres são enviadas separadamente.
-        if legenda and len(legenda) > 1024:
+        # A legenda original é sempre enviada separadamente do vídeo.
+        if legenda:
             await update.message.reply_text(
                 legenda,
-                reply_markup=teclado_ia,
-            )
-
-        # Se a legenda já coube no vídeo, envia somente o botão abaixo.
-        elif teclado_ia:
-            await update.message.reply_text(
-                "✨",
                 reply_markup=teclado_ia,
             )
 
@@ -731,10 +712,6 @@ async def download_video(
         if video_enviado:
             return
 
-        try:
-            await update.message.set_reaction(ReactionTypeEmoji("❎"))
-        except Exception as erro_reacao:
-            print(f"Erro ao adicionar reação de erro: {erro_reacao}")
 
         erro = str(e).lower()
 
@@ -769,13 +746,6 @@ async def download_video(
         )
 
         if not video_enviado:
-            try:
-                await update.message.set_reaction(ReactionTypeEmoji("❎"))
-            except Exception as erro_reacao:
-                print(
-                    f"Erro ao adicionar reação de erro: "
-                    f"{erro_reacao}"
-                )
 
             try:
                 await status_msg.edit_text(t["unexpected"])
