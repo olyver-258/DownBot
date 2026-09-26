@@ -458,9 +458,6 @@ def identificar_plataforma(url):
     if "pinterest.com" in url or "pin.it" in url:
         return "pinterest"
 
-    if "youtube.com" in url or "youtu.be" in url:
-        return "youtube"
-
     return None
 
 
