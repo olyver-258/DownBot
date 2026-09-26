@@ -62,10 +62,10 @@ TEXTOS = {
         "start": "🌍 Escolha o seu idioma:",
         "welcome": (
             "✅ Idioma definido para Português.\n\n"
-            "Envie um link do Instagram, TikTok ou Facebook e Twitter/X."
+            "Envie um link do Instagram, TikTok, Facebook, Twitter/X ou Pinterest."
         ),
         "invalid": (
-            "❌ Envie um link válido do Instagram, TikTok ou Facebook e Twitter/X."
+            "❌ Envie um link válido do Instagram, TikTok, Facebook, Twitter/X ou Pinterest."
         ),
         "busy": (
             "⏳ Você já tem um vídeo sendo processado. Aguarde terminar."
@@ -87,6 +87,13 @@ TEXTOS = {
         "unexpected": (
             "❌ Ocorreu um erro ao processar o vídeo. Tente novamente."
         ),
+        "rewrite_button": '✨ Recriar legenda',
+        "rewrite_processing": '✨ Recriando legenda...',
+        "rewrite_done": '✨ Legenda recriada:',
+        "rewrite_not_found": '❌ Não encontrei uma legenda para recriar.',
+        "rewrite_unavailable": '❌ A IA está temporariamente indisponível. Tente novamente daqui a pouco.',
+        "rewrite_private": 'Esta função é privada.',
+        "rewrite_language": 'português',
         "language": "🌍 Escolha o seu idioma:",
     },
 
@@ -94,10 +101,10 @@ TEXTOS = {
         "start": "🌍 Choose your language:",
         "welcome": (
             "✅ Language set to English.\n\n"
-            "Send an Instagram, TikTok or Facebook e Twitter/X link."
+            "Send an Instagram, TikTok, Facebook, Twitter/X or Pinterest link."
         ),
         "invalid": (
-            "❌ Send a valid Instagram, TikTok or Facebook e Twitter/X link."
+            "❌ Send a valid Instagram, TikTok, Facebook, Twitter/X or Pinterest link."
         ),
         "busy": (
             "⏳ You already have a video being processed. Please wait."
@@ -119,6 +126,13 @@ TEXTOS = {
         "unexpected": (
             "❌ An error occurred while processing the video. Please try again."
         ),
+        "rewrite_button": '✨ Rewrite caption',
+        "rewrite_processing": '✨ Rewriting caption...',
+        "rewrite_done": '✨ Caption rewritten:',
+        "rewrite_not_found": "❌ I couldn't find a caption to rewrite.",
+        "rewrite_unavailable": '❌ AI is temporarily unavailable. Please try again later.',
+        "rewrite_private": 'This feature is private.',
+        "rewrite_language": 'English',
         "language": "🌍 Choose your language:",
     },
 
@@ -126,10 +140,10 @@ TEXTOS = {
         "start": "🌍 Choisissez votre langue :",
         "welcome": (
             "✅ Langue définie sur Français.\n\n"
-            "Envoyez un lien Instagram, TikTok ou Facebook e Twitter/X."
+            "Envoyez un lien Instagram, TikTok, Facebook, Twitter/X ou Pinterest."
         ),
         "invalid": (
-            "❌ Envoyez un lien Instagram, TikTok ou Facebook e Twitter/X valide."
+            "❌ Envoyez un lien Instagram, TikTok, Facebook, Twitter/X ou Pinterest valide."
         ),
         "busy": (
             "⏳ Une vidéo est déjà en cours de traitement. Veuillez patienter."
@@ -153,6 +167,13 @@ TEXTOS = {
             "❌ Une erreur s'est produite lors du traitement de la vidéo. "
             "Veuillez réessayer."
         ),
+        "rewrite_button": '✨ Réécrire la légende',
+        "rewrite_processing": '✨ Réécriture de la légende...',
+        "rewrite_done": '✨ Légende réécrite :',
+        "rewrite_not_found": "❌ Je n'ai trouvé aucune légende à réécrire.",
+        "rewrite_unavailable": "❌ L'IA est temporairement indisponible. Réessayez plus tard.",
+        "rewrite_private": 'Cette fonctionnalité est privée.',
+        "rewrite_language": 'français',
         "language": "🌍 Choisissez votre langue :",
     },
 
@@ -160,10 +181,10 @@ TEXTOS = {
         "start": "🌍 Elige tu idioma:",
         "welcome": (
             "✅ Idioma configurado en Español.\n\n"
-            "Envía un enlace de Instagram, TikTok o Facebook e Twitter/X."
+            "Envía un enlace de Instagram, TikTok, Facebook, Twitter/X o Pinterest."
         ),
         "invalid": (
-            "❌ Envía un enlace válido de Instagram, TikTok o Facebook e Twitter/X."
+            "❌ Envía un enlace válido de Instagram, TikTok, Facebook, Twitter/X o Pinterest."
         ),
         "busy": (
             "⏳ Ya tienes un video en proceso. Espera a que termine."
@@ -186,6 +207,13 @@ TEXTOS = {
         "unexpected": (
             "❌ Ocurrió un error al procesar el video. Inténtalo de nuevo."
         ),
+        "rewrite_button": '✨ Reescribir descripción',
+        "rewrite_processing": '✨ Reescribiendo descripción...',
+        "rewrite_done": '✨ Descripción reescrita:',
+        "rewrite_not_found": '❌ No encontré una descripción para reescribir.',
+        "rewrite_unavailable": '❌ La IA no está disponible temporalmente. Inténtalo de nuevo más tarde.',
+        "rewrite_private": 'Esta función es privada.',
+        "rewrite_language": 'español',
         "language": "🌍 Elige tu idioma:",
     },
 
@@ -193,10 +221,10 @@ TEXTOS = {
         "start": "🌍 अपनी भाषा चुनें:",
         "welcome": (
             "✅ भाषा हिन्दी पर सेट कर दी गई है।\n\n"
-            "Instagram, TikTok या Facebook e Twitter/X लिंक भेजें।"
+            "Instagram, TikTok, Facebook, Twitter/X या Pinterest लिंक भेजें।"
         ),
         "invalid": (
-            "❌ कृपया एक मान्य Instagram, TikTok या Facebook e Twitter/X लिंक भेजें।"
+            "❌ कृपया एक मान्य Instagram, TikTok, Facebook, Twitter/X या Pinterest लिंक भेजें।"
         ),
         "busy": (
             "⏳ आपका एक वीडियो पहले से प्रोसेस हो रहा है। कृपया प्रतीक्षा करें।"
@@ -217,6 +245,13 @@ TEXTOS = {
         "unexpected": (
             "❌ वीडियो प्रोसेस करते समय त्रुटि हुई। फिर कोशिश करें।"
         ),
+        "rewrite_button": '✨ कैप्शन दोबारा लिखें',
+        "rewrite_processing": '✨ कैप्शन दोबारा लिखा जा रहा है...',
+        "rewrite_done": '✨ नया कैप्शन:',
+        "rewrite_not_found": '❌ दोबारा लिखने के लिए कोई कैप्शन नहीं मिला।',
+        "rewrite_unavailable": '❌ AI अस्थायी रूप से उपलब्ध नहीं है। कृपया बाद में फिर कोशिश करें।',
+        "rewrite_private": 'यह सुविधा निजी है।',
+        "rewrite_language": 'हिन्दी',
         "language": "🌍 अपनी भाषा चुनें:",
     },
 
@@ -224,10 +259,10 @@ TEXTOS = {
         "start": "🌍 اختر لغتك:",
         "welcome": (
             "✅ تم اختيار اللغة العربية.\n\n"
-            "أرسل رابط Instagram أو TikTok أو Facebook e Twitter/X."
+            "أرسل رابط Instagram أو TikTok أو Facebook أو Twitter/X أو Pinterest."
         ),
         "invalid": (
-            "❌ أرسل رابط Instagram أو TikTok أو Facebook e Twitter/X صالحًا."
+            "❌ أرسل رابطًا صالحًا من Instagram أو TikTok أو Facebook أو Twitter/X أو Pinterest."
         ),
         "busy": (
             "⏳ لديك فيديو قيد المعالجة بالفعل. يرجى الانتظار."
@@ -249,6 +284,13 @@ TEXTOS = {
         "unexpected": (
             "❌ حدث خطأ أثناء معالجة الفيديو. حاول مرة أخرى."
         ),
+        "rewrite_button": '✨ إعادة كتابة الوصف',
+        "rewrite_processing": '✨ جارٍ إعادة كتابة الوصف...',
+        "rewrite_done": '✨ تمت إعادة كتابة الوصف:',
+        "rewrite_not_found": '❌ لم أجد وصفًا لإعادة كتابته.',
+        "rewrite_unavailable": '❌ الذكاء الاصطناعي غير متاح مؤقتًا. حاول مرة أخرى لاحقًا.',
+        "rewrite_private": 'هذه الميزة خاصة.',
+        "rewrite_language": 'العربية',
         "language": "🌍 اختر لغتك:",
     },
 }
@@ -473,36 +515,40 @@ def baixar_video(url, pasta_temp):
 
 async def recriar_legenda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    user_id = update.effective_user.id
+
+    idioma = obter_idioma(user_id)
+    t = TEXTOS[idioma]
 
     # Segurança: somente o administrador pode usar a IA
-    if update.effective_user.id != ADMIN_ID:
+    if user_id != ADMIN_ID:
         await query.answer(
-            "Esta função é privada.",
+            t["rewrite_private"],
             show_alert=True,
         )
         return
 
     await query.answer()
 
-    legenda_original = legendas_para_recriar.get(
-        update.effective_user.id
-    )
+    legenda_original = legendas_para_recriar.get(user_id)
 
     if not legenda_original:
         await query.edit_message_text(
-            "❌ Não encontrei uma legenda para recriar."
+            t["rewrite_not_found"]
         )
         return
 
     if not gemini_client:
         await query.edit_message_text(
-            "❌ Gemini não está configurado."
+            t["rewrite_unavailable"]
         )
         return
 
     await query.edit_message_text(
-        "✨ Recriando legenda..."
+        t["rewrite_processing"]
     )
+
+    idioma_resposta = t["rewrite_language"]
 
     prompt = f"""Sua única tarefa é reescrever a legenda fornecida abaixo.
 
@@ -514,7 +560,8 @@ IMPORTANTE:
 - Não faça nenhuma tarefa além de recriar a legenda.
 
 REGRAS DA REESCRITA:
-- Escreva em português natural e fluido.
+- Escreva obrigatoriamente em {idioma_resposta}, independentemente do idioma da legenda original.
+- Use linguagem natural e fluida.
 - Não faça uma simples paráfrase palavra por palavra.
 - O resultado não deve parecer uma cópia do texto original.
 - Preserve fatos, nomes e informações importantes.
@@ -548,30 +595,34 @@ LEGENDA ORIGINAL:
                     "Gemini retornou uma resposta vazia."
                 )
 
-            # Remove o botão da mensagem original sem alterar a legenda.
+            # Remove o botão da mensagem original.
             try:
-                await query.edit_message_reply_markup(reply_markup=None)
+                await query.edit_message_reply_markup(
+                    reply_markup=None
+                )
             except Exception as e:
                 if "message is not modified" not in str(e).lower():
                     raise
 
-            # Envia primeiro a legenda recriada.
+            # Envia a legenda recriada.
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=nova_legenda,
             )
 
-            # Confirmação fica por baixo da nova legenda.
+            # Confirmação no idioma selecionado.
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text="✨ Legenda recriada:",
+                text=t["rewrite_done"],
             )
 
-            # Apaga a mensagem temporária "Recriando legenda..."
+            # Apaga a mensagem temporária de processamento.
             try:
                 await query.message.delete()
             except Exception as e:
-                print(f"Erro ao apagar mensagem de processamento: {e}")
+                print(
+                    f"Erro ao apagar mensagem de processamento: {e}"
+                )
 
             return
 
@@ -579,7 +630,6 @@ LEGENDA ORIGINAL:
             ultimo_erro = e
             erro_texto = str(e).lower()
 
-            # 503 = modelo temporariamente indisponível/sobrecarregado
             if "503" in erro_texto or "unavailable" in erro_texto:
                 if tentativa < 2:
                     espera = 3 * (tentativa + 1)
@@ -595,8 +645,7 @@ LEGENDA ORIGINAL:
     print(f"Erro Gemini após tentativas: {ultimo_erro}")
 
     await query.edit_message_text(
-        "❌ Gemini está temporariamente indisponível. "
-        "Tente novamente daqui a pouco."
+        t["rewrite_unavailable"]
     )
 
 
@@ -708,7 +757,7 @@ async def download_video(
             teclado_ia = InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton(
-                        "✨ Recriar legenda",
+                        t["rewrite_button"],
                         callback_data="recriar_legenda",
                     )
                 ]
