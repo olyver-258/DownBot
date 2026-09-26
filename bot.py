@@ -13,6 +13,7 @@ from telegram import (
     InlineKeyboardMarkup,
     BotCommand,
     ReplyParameters,
+    ReactionTypeEmoji,
 )
 from telegram.ext import (
     ApplicationBuilder,
@@ -670,7 +671,7 @@ async def download_video(
         await context.bot.set_message_reaction(
             chat_id=update.effective_chat.id,
             message_id=update.message.message_id,
-            reaction="🎥",
+            reaction=[ReactionTypeEmoji(emoji="🎥")],
         )
     except Exception as e:
         # Uma falha na reação nunca deve impedir o download.
