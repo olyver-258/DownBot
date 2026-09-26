@@ -12,6 +12,7 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     BotCommand,
+    ReplyParameters,
 )
 from telegram.ext import (
     ApplicationBuilder,
@@ -664,6 +665,17 @@ async def download_video(
         await update.message.reply_text(t["invalid"])
         return
 
+    # Reage à mensagem que contém o link válido.
+    try:
+        await context.bot.set_message_reaction(
+            chat_id=update.effective_chat.id,
+            message_id=update.message.message_id,
+            reaction="🎥",
+        )
+    except Exception as e:
+        # Uma falha na reação nunca deve impedir o download.
+        print(f"Não foi possível adicionar reação: {e}")
+
     agora = asyncio.get_running_loop().time()
     bloqueio = usuarios_ocupados.get(user_id)
 
@@ -723,6 +735,9 @@ async def download_video(
                     write_timeout=120,
                     connect_timeout=60,
                     pool_timeout=60,
+                    reply_parameters=ReplyParameters(
+                        message_id=update.message.message_id
+                    ),
                 )
 
             except Exception as erro_video:
@@ -742,6 +757,9 @@ async def download_video(
                     write_timeout=120,
                     connect_timeout=60,
                     pool_timeout=60,
+                    reply_parameters=ReplyParameters(
+                        message_id=update.message.message_id
+                    ),
                 )
 
         # Só marcamos como enviado depois que o Telegram confirmou o envio.
