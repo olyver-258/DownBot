@@ -411,6 +411,9 @@ def identificar_plataforma(url):
     if "twitter.com" in url or "x.com" in url:
         return "twitter"
 
+    if "pinterest.com" in url or "pin.it" in url:
+        return "pinterest"
+
     return None
 
 
