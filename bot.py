@@ -539,11 +539,18 @@ async def recriar_legenda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except (IndexError, AttributeError):
         legenda_id = None
 
-    legenda_original = (
+    dados_legenda = (
         legendas_para_recriar.get(legenda_id)
         if legenda_id
         else None
     )
+
+    if not dados_legenda:
+        legenda_original = None
+        video_message_id = None
+    else:
+        legenda_original = dados_legenda["legenda"]
+        video_message_id = dados_legenda["video_message_id"]
 
     if not legenda_original:
         await query.edit_message_text(
@@ -621,6 +628,9 @@ LEGENDA ORIGINAL:
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=nova_legenda,
+                reply_parameters=ReplyParameters(
+                    message_id=video_message_id
+                ),
             )
 
             # Confirmação no idioma selecionado.
@@ -739,7 +749,7 @@ async def download_video(
 
         with open(filename, "rb") as video_file:
             try:
-                await update.message.reply_video(
+                mensagem_video = await update.message.reply_video(
                     video=video_file,
                     caption=t["caption"],
                     supports_streaming=True,
@@ -762,7 +772,7 @@ async def download_video(
 
                 video_file.seek(0)
 
-                await update.message.reply_document(
+                mensagem_video = await update.message.reply_document(
                     document=video_file,
                     caption=t["caption"],
                     read_timeout=120,
@@ -783,7 +793,10 @@ async def download_video(
 
         if update.effective_user.id == ADMIN_ID and legenda:
             legenda_id = str(uuid.uuid4())[:8]
-            legendas_para_recriar[legenda_id] = legenda
+            legendas_para_recriar[legenda_id] = {
+                "legenda": legenda,
+                "video_message_id": mensagem_video.message_id,
+            }
 
             teclado_ia = InlineKeyboardMarkup([
                 [
