@@ -1,3 +1,4 @@
+import uuid
 import os
 import re
 import asyncio
@@ -532,7 +533,17 @@ async def recriar_legenda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.answer()
 
-    legenda_original = legendas_para_recriar.get(user_id)
+    # Cada botão contém o ID da sua própria legenda.
+    try:
+        legenda_id = query.data.split(":", 1)[1]
+    except (IndexError, AttributeError):
+        legenda_id = None
+
+    legenda_original = (
+        legendas_para_recriar.get(legenda_id)
+        if legenda_id
+        else None
+    )
 
     if not legenda_original:
         await query.edit_message_text(
@@ -771,13 +782,14 @@ async def download_video(
         teclado_ia = None
 
         if update.effective_user.id == ADMIN_ID and legenda:
-            legendas_para_recriar[update.effective_user.id] = legenda
+            legenda_id = str(uuid.uuid4())[:8]
+            legendas_para_recriar[legenda_id] = legenda
 
             teclado_ia = InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton(
                         t["rewrite_button"],
-                        callback_data="recriar_legenda",
+                        callback_data=f"recriar_legenda:{legenda_id}",
                     )
                 ]
             ])
@@ -904,7 +916,7 @@ if __name__ == "__main__":
     app.add_handler(
         CallbackQueryHandler(
             recriar_legenda,
-            pattern=r"^recriar_legenda$",
+            pattern=r"^recriar_legenda:",
         )
     )
 
