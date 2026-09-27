@@ -1,3 +1,4 @@
+import base64
 import uuid
 import os
 import re
@@ -54,6 +55,28 @@ idiomas_usuarios = {}# user_id -> idioma
 idiomas_usuarios = {}
 # Legenda original aguardando recriação pelo admin
 legendas_para_recriar = {}
+
+
+# =========================================================
+# COOKIES DO YOUTUBE
+# =========================================================
+
+youtube_cookies_b64 = os.getenv("YOUTUBE_COOKIES_B64")
+
+if youtube_cookies_b64:
+    try:
+        youtube_cookies_path = os.path.join(
+            tempfile.gettempdir(),
+            "youtube_cookies.txt"
+        )
+
+        with open(youtube_cookies_path, "wb") as f:
+            f.write(base64.b64decode(youtube_cookies_b64))
+
+        os.environ["YOUTUBE_COOKIES_PATH"] = youtube_cookies_path
+        print("Cookies do YouTube carregados.")
+    except Exception as e:
+        print(f"Erro ao carregar cookies do YouTube: {e}")
 
 
 # =========================================================
@@ -459,6 +482,9 @@ def identificar_plataforma(url):
     if "pinterest.com" in url or "pin.it" in url:
         return "pinterest"
 
+    if "youtube.com" in url or "youtu.be" in url:
+        return "youtube"
+
     return None
 
 
@@ -484,9 +510,44 @@ def baixar_video(url, pasta_temp):
         ),
     }
 
+    # Configuração adicional necessária para o YouTube.
+    if "youtube.com" in url.lower() or "youtu.be" in url.lower():
+        cookies_path = os.getenv("YOUTUBE_COOKIES_PATH")
+
+        ydl_options.update({
+            "format": "bestvideo+bestaudio/best",
+            "merge_output_format": "mp4",
+            "js_runtimes": {"node": {}},
+            "remote_components": {"ejs:github"},
+        })
+
+        if cookies_path and os.path.exists(cookies_path):
+            ydl_options["cookiefile"] = cookies_path
+
     with yt_dlp.YoutubeDL(ydl_options) as ydl:
         info = ydl.extract_info(url, download=True)
         filename = ydl.prepare_filename(info)
+
+        # Depois de um merge, prepare_filename pode apontar para
+        # a extensão do stream original em vez do arquivo final.
+        if (
+            "youtube.com" in url.lower()
+            or "youtu.be" in url.lower()
+        ):
+            arquivos_finais = [
+                p for p in Path(pasta_temp).iterdir()
+                if p.is_file()
+                and not p.name.endswith(".part")
+                and not p.name.endswith(".ytdl")
+            ]
+
+            if arquivos_finais:
+                filename = str(
+                    max(
+                        arquivos_finais,
+                        key=lambda p: p.stat().st_size
+                    )
+                )
 
     legenda = info.get("description") or info.get("title") or ""
 
