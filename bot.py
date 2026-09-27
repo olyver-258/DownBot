@@ -15,6 +15,8 @@ from telegram import (
     BotCommand,
     ReplyParameters,
     ReactionTypeEmoji,
+    InputMediaPhoto,
+    InputMediaVideo,
 )
 from telegram.ext import (
     ApplicationBuilder,
@@ -26,6 +28,7 @@ from telegram.ext import (
 )
 
 import yt_dlp
+import instaloader
 from google import genai
 
 
@@ -512,6 +515,165 @@ def baixar_video(url, pasta_temp):
     )
 
 
+
+# =========================================================
+# DOWNLOAD DE IMAGENS/CARROSSEL DO INSTAGRAM
+# =========================================================
+
+def detectar_tipo_instagram(url):
+    """
+    Retorna:
+    - foto
+    - carrossel
+    - video
+    """
+
+    match = re.search(
+        r"instagram\.com/(?:p|reel)/([^/?#]+)",
+        url,
+        re.IGNORECASE,
+    )
+
+    if not match:
+        raise ValueError(
+            "Não foi possível identificar o post do Instagram."
+        )
+
+    shortcode = match.group(1)
+
+    loader = instaloader.Instaloader(
+        download_pictures=False,
+        download_videos=False,
+        download_video_thumbnails=False,
+        download_geotags=False,
+        download_comments=False,
+        save_metadata=False,
+        compress_json=False,
+        quiet=True,
+    )
+
+    post = instaloader.Post.from_shortcode(
+        loader.context,
+        shortcode,
+    )
+
+    if post.typename == "GraphSidecar":
+        return "carrossel"
+
+    if post.is_video:
+        return "video"
+
+    return "foto"
+
+
+def baixar_instagram_instaloader(url, pasta_temp):
+    # Aceita links /p/ e /reel/ e extrai o shortcode.
+    match = re.search(
+        r"instagram\.com/(?:p|reel)/([^/?#]+)",
+        url,
+        re.IGNORECASE,
+    )
+
+    if not match:
+        raise ValueError("Não foi possível identificar o post do Instagram.")
+
+    shortcode = match.group(1)
+
+    loader = instaloader.Instaloader(
+        download_pictures=False,
+        download_videos=False,
+        download_video_thumbnails=False,
+        download_geotags=False,
+        download_comments=False,
+        save_metadata=False,
+        compress_json=False,
+        quiet=True,
+    )
+
+    post = instaloader.Post.from_shortcode(
+        loader.context,
+        shortcode,
+    )
+
+    legenda = post.caption or ""
+
+    # Vídeo único/Reel continua no yt-dlp.
+    if post.typename == "GraphVideo":
+        return {
+            "tipo": "video_unico",
+            "arquivos": [],
+            "legenda": legenda,
+        }
+
+    itens = []
+
+    # Carrossel.
+    if post.typename == "GraphSidecar":
+        nodes = list(post.get_sidecar_nodes())
+
+        for indice, node in enumerate(nodes, start=1):
+            if node.is_video:
+                url_media = node.video_url
+                extensao = ".mp4"
+                tipo = "video"
+            else:
+                url_media = node.display_url
+                extensao = ".jpg"
+                tipo = "foto"
+
+            caminho = os.path.join(
+                pasta_temp,
+                f"{indice:02d}_{tipo}{extensao}",
+            )
+
+            itens.append({
+                "tipo": tipo,
+                "url": url_media,
+                "caminho": caminho,
+            })
+
+    # Foto única.
+    else:
+        caminho = os.path.join(
+            pasta_temp,
+            "01_foto.jpg",
+        )
+
+        itens.append({
+            "tipo": "foto",
+            "url": post.url,
+            "caminho": caminho,
+        })
+
+    # Faz o download dos arquivos.
+    import urllib.request
+
+    for item in itens:
+        request = urllib.request.Request(
+            item["url"],
+            headers={
+                "User-Agent": "Mozilla/5.0",
+            },
+        )
+
+        with urllib.request.urlopen(
+            request,
+            timeout=60,
+        ) as resposta:
+            with open(item["caminho"], "wb") as arquivo:
+                shutil.copyfileobj(resposta, arquivo)
+
+    return {
+        "tipo": (
+            "carrossel"
+            if post.typename == "GraphSidecar"
+            else "foto"
+        ),
+        "arquivos": itens,
+        "legenda": legenda,
+    }
+
+
 # =========================================================
 # RECEBER E PROCESSAR LINK
 # =========================================================
@@ -672,6 +834,19 @@ LEGENDA ORIGINAL:
     )
 
 
+async def reagir_falha(update, context):
+    """Troca a reação da mensagem original para 👎 em caso de falha."""
+    try:
+        await context.bot.set_message_reaction(
+            chat_id=update.effective_chat.id,
+            message_id=update.message.message_id,
+            reaction=[ReactionTypeEmoji(emoji="👎")],
+        )
+    except Exception as e:
+        # Uma falha na reação nunca deve interferir no bot.
+        print(f"Não foi possível adicionar reação de falha: {e}")
+
+
 async def download_video(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -725,69 +900,194 @@ async def download_video(
     try:
         loop = asyncio.get_running_loop()
 
-        filename, legenda = await loop.run_in_executor(
-            None,
-            baixar_video,
-            url,
-            pasta_temp,
-        )
+        # Instagram: fotos e carrosséis usam Instaloader.
+        # Vídeos/Reels continuam usando o yt-dlp normalmente.
+        resultado_instagram = None
+
+        if plataforma == "instagram":
+            tipo_instagram = await loop.run_in_executor(
+                None,
+                detectar_tipo_instagram,
+                url,
+            )
+
+            if tipo_instagram in ("foto", "carrossel"):
+                resultado_instagram = await loop.run_in_executor(
+                    None,
+                    baixar_instagram_instaloader,
+                    url,
+                    pasta_temp,
+                )
+
+                legenda = resultado_instagram["legenda"]
+                filename = None
+
+            else:
+                filename, legenda = await loop.run_in_executor(
+                    None,
+                    baixar_video,
+                    url,
+                    pasta_temp,
+                )
+
+        else:
+            filename, legenda = await loop.run_in_executor(
+                None,
+                baixar_video,
+                url,
+                pasta_temp,
+            )
 
         # A legenda original é sempre enviada separadamente.
 
-        if not os.path.exists(filename):
-            raise FileNotFoundError(
-                "Arquivo não encontrado após o download."
-            )
-
-        tamanho = os.path.getsize(filename)
-
-        if tamanho > MAX_FILE_SIZE:
-            await status_msg.edit_text(t["too_large"])
-            return
-
         await status_msg.edit_text(t["sending"])
 
-        with open(filename, "rb") as video_file:
-            try:
-                mensagem_video = await update.message.reply_video(
-                    video=video_file,
-                    caption=t["caption"],
-                    supports_streaming=True,
-                    read_timeout=120,
-                    write_timeout=120,
-                    connect_timeout=60,
-                    pool_timeout=60,
-                    reply_parameters=ReplyParameters(
-                        message_id=update.message.message_id
-                    ),
+        mensagem_video = None
+
+        # =====================================================
+        # FOTO / CARROSSEL DO INSTAGRAM
+        # =====================================================
+        if resultado_instagram is not None:
+            itens = resultado_instagram["arquivos"]
+
+            if not itens:
+                raise FileNotFoundError(
+                    "Nenhuma mídia encontrada no post."
                 )
 
-            except Exception as erro_video:
-                # Alguns arquivos são baixados corretamente, mas o Telegram
-                # não os aceita como "vídeo". Nesse caso, tenta como documento.
-                print(
-                    f"Falha ao enviar como vídeo "
-                    f"[{plataforma}]: {erro_video}"
+            # Confere se todos os arquivos existem e respeitam o limite.
+            for item in itens:
+                caminho = item["caminho"]
+
+                if not os.path.exists(caminho):
+                    raise FileNotFoundError(
+                        f"Arquivo não encontrado: {caminho}"
+                    )
+
+                if os.path.getsize(caminho) > MAX_FILE_SIZE:
+                    await status_msg.edit_text(t["too_large"])
+                    return
+
+            # FOTO ÚNICA
+            if len(itens) == 1 and itens[0]["tipo"] == "foto":
+                with open(itens[0]["caminho"], "rb") as foto:
+                    mensagem_video = await update.message.reply_photo(
+                        photo=foto,
+                        reply_parameters=ReplyParameters(
+                            message_id=update.message.message_id
+                        ),
+                    )
+
+            # CARROSSEL / CARROSSEL MISTO
+            else:
+                # Telegram aceita no máximo 10 mídias por grupo.
+                for inicio_grupo in range(0, len(itens), 10):
+                    grupo_itens = itens[inicio_grupo:inicio_grupo + 10]
+
+                    arquivos_abertos = []
+                    grupo = []
+
+                    try:
+                        for item in grupo_itens:
+                            arquivo = open(item["caminho"], "rb")
+                            arquivos_abertos.append(arquivo)
+
+                            if item["tipo"] == "video":
+                                grupo.append(
+                                    InputMediaVideo(
+                                        media=arquivo,
+                                        supports_streaming=True,
+                                    )
+                                )
+                            else:
+                                grupo.append(
+                                    InputMediaPhoto(
+                                        media=arquivo,
+                                    )
+                                )
+
+                        mensagens = await update.message.reply_media_group(
+                            media=grupo,
+                            read_timeout=120,
+                            write_timeout=120,
+                            connect_timeout=60,
+                            pool_timeout=60,
+                            reply_parameters=ReplyParameters(
+                                message_id=update.message.message_id
+                            ),
+                        )
+
+                        # Guarda a primeira mensagem enviada.
+                        if mensagem_video is None and mensagens:
+                            mensagem_video = mensagens[0]
+
+                    finally:
+                        for arquivo in arquivos_abertos:
+                            try:
+                                arquivo.close()
+                            except Exception:
+                                pass
+
+            if mensagem_video is None:
+                raise RuntimeError(
+                    "Telegram não confirmou o envio da mídia."
                 )
 
-                video_file.seek(0)
+            video_enviado = True
 
-                mensagem_video = await update.message.reply_document(
-                    document=video_file,
-                    caption=t["caption"],
-                    read_timeout=120,
-                    write_timeout=120,
-                    connect_timeout=60,
-                    pool_timeout=60,
-                    reply_parameters=ReplyParameters(
-                        message_id=update.message.message_id
-                    ),
+        # =====================================================
+        # VÍDEO NORMAL / REEL / OUTRAS PLATAFORMAS
+        # =====================================================
+        else:
+            if not filename or not os.path.exists(filename):
+                raise FileNotFoundError(
+                    "Arquivo não encontrado após o download."
                 )
 
-        # Só marcamos como enviado depois que o Telegram confirmou o envio.
-        video_enviado = True
+            tamanho = os.path.getsize(filename)
 
-        
+            if tamanho > MAX_FILE_SIZE:
+                await status_msg.edit_text(t["too_large"])
+                return
+
+            with open(filename, "rb") as video_file:
+                try:
+                    mensagem_video = await update.message.reply_video(
+                        video=video_file,
+                        caption=t["caption"],
+                        supports_streaming=True,
+                        read_timeout=120,
+                        write_timeout=120,
+                        connect_timeout=60,
+                        pool_timeout=60,
+                        reply_parameters=ReplyParameters(
+                            message_id=update.message.message_id
+                        ),
+                    )
+
+                except Exception as erro_video:
+                    print(
+                        f"Falha ao enviar como vídeo "
+                        f"[{plataforma}]: {erro_video}"
+                    )
+
+                    video_file.seek(0)
+
+                    mensagem_video = await update.message.reply_document(
+                        document=video_file,
+                        caption=t["caption"],
+                        read_timeout=120,
+                        write_timeout=120,
+                        connect_timeout=60,
+                        pool_timeout=60,
+                        reply_parameters=ReplyParameters(
+                            message_id=update.message.message_id
+                        ),
+                    )
+
+            video_enviado = True
+
+
         # Prepara o botão privado de IA somente para o administrador.
         teclado_ia = None
 
@@ -821,6 +1121,8 @@ async def download_video(
 
     except yt_dlp.utils.DownloadError as e:
         print(f"Erro yt-dlp [{plataforma}]: {e}")
+
+        await reagir_falha(update, context)
 
         # Evita falso erro caso o vídeo já tenha sido enviado.
         if video_enviado:
@@ -858,6 +1160,8 @@ async def download_video(
             f"Erro inesperado [{plataforma}]: "
             f"{type(e).__name__}: {e}"
         )
+
+        await reagir_falha(update, context)
 
         if not video_enviado:
 
