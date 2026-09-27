@@ -78,6 +78,8 @@ TEXTOS = {
         ),
         "processing": "⏳ Processando vídeo... aguarde.",
         "sending": "📤 Enviando vídeo...",
+        "sending_image": "📤 Enviando imagem...",
+        "sending_carousel": "📤 Enviando carrossel...",
         "caption": "✅ AQUI ESTÁ O SEU VÍDEO! 😃",
         "private": (
             "🔒 Não consegui acessar esse vídeo.\n\n"
@@ -117,6 +119,8 @@ TEXTOS = {
         ),
         "processing": "⏳ Processing video... please wait.",
         "sending": "📤 Sending video...",
+        "sending_image": "📤 Sending image...",
+        "sending_carousel": "📤 Sending carousel...",
         "caption": "✅ HERE IS YOUR VIDEO! 😃",
         "private": (
             "🔒 I couldn't access this video.\n\n"
@@ -156,6 +160,8 @@ TEXTOS = {
         ),
         "processing": "⏳ Traitement de la vidéo... veuillez patienter.",
         "sending": "📤 Envoi de la vidéo...",
+        "sending_image": "📤 Envoi de l’image...",
+        "sending_carousel": "📤 Envoi du carrousel...",
         "caption": "✅ VOICI VOTRE VIDÉO ! 😃",
         "private": (
             "🔒 Je n'ai pas pu accéder à cette vidéo.\n\n"
@@ -197,6 +203,8 @@ TEXTOS = {
         ),
         "processing": "⏳ Procesando video... espera.",
         "sending": "📤 Enviando video...",
+        "sending_image": "📤 Enviando imagen...",
+        "sending_carousel": "📤 Enviando carrusel...",
         "caption": "✅ ¡AQUÍ ESTÁ TU VIDEO! 😃",
         "private": (
             "🔒 No pude acceder a este video.\n\n"
@@ -237,6 +245,8 @@ TEXTOS = {
         ),
         "processing": "⏳ वीडियो प्रोसेस हो रहा है... कृपया प्रतीक्षा करें।",
         "sending": "📤 वीडियो भेजा जा रहा है...",
+        "sending_image": "📤 तस्वीर भेजी जा रही है...",
+        "sending_carousel": "📤 कैरोसेल भेजा जा रहा है...",
         "caption": "✅ आपका वीडियो यहाँ है! 😃",
         "private": (
             "🔒 मैं इस वीडियो तक पहुँच नहीं सका।\n\n"
@@ -275,6 +285,8 @@ TEXTOS = {
         ),
         "processing": "⏳ جارٍ معالجة الفيديو... يرجى الانتظار.",
         "sending": "📤 جارٍ إرسال الفيديو...",
+        "sending_image": "📤 جارٍ إرسال الصورة...",
+        "sending_carousel": "📤 جارٍ إرسال المنشور الدائري...",
         "caption": "✅ إليك الفيديو! 😃",
         "private": (
             "🔒 لم أتمكن من الوصول إلى هذا الفيديو.\n\n"
@@ -940,7 +952,13 @@ async def download_video(
 
         # A legenda original é sempre enviada separadamente.
 
-        await status_msg.edit_text(t["sending"])
+        if resultado_instagram is not None:
+            if resultado_instagram["tipo"] == "carrossel":
+                await status_msg.edit_text(t["sending_carousel"])
+            else:
+                await status_msg.edit_text(t["sending_image"])
+        else:
+            await status_msg.edit_text(t["sending"])
 
         mensagem_video = None
 
