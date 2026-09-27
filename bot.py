@@ -77,6 +77,8 @@ TEXTOS = {
             "⏳ Você já tem um vídeo sendo processado. Aguarde terminar."
         ),
         "processing": "⏳ Processando vídeo... aguarde.",
+        "processing_image": "⏳ Processando imagem... aguarde.",
+        "processing_carousel": "⏳ Processando carrossel... aguarde.",
         "sending": "📤 Enviando vídeo...",
         "sending_image": "📤 Enviando imagem...",
         "sending_carousel": "📤 Enviando carrossel...",
@@ -118,6 +120,8 @@ TEXTOS = {
             "⏳ You already have a video being processed. Please wait."
         ),
         "processing": "⏳ Processing video... please wait.",
+        "processing_image": "⏳ Processing image... please wait.",
+        "processing_carousel": "⏳ Processing carousel... please wait.",
         "sending": "📤 Sending video...",
         "sending_image": "📤 Sending image...",
         "sending_carousel": "📤 Sending carousel...",
@@ -159,6 +163,8 @@ TEXTOS = {
             "⏳ Une vidéo est déjà en cours de traitement. Veuillez patienter."
         ),
         "processing": "⏳ Traitement de la vidéo... veuillez patienter.",
+        "processing_image": "⏳ Traitement de l’image... veuillez patienter.",
+        "processing_carousel": "⏳ Traitement du carrousel... veuillez patienter.",
         "sending": "📤 Envoi de la vidéo...",
         "sending_image": "📤 Envoi de l’image...",
         "sending_carousel": "📤 Envoi du carrousel...",
@@ -202,6 +208,8 @@ TEXTOS = {
             "⏳ Ya tienes un video en proceso. Espera a que termine."
         ),
         "processing": "⏳ Procesando video... espera.",
+        "processing_image": "⏳ Procesando imagen... espera.",
+        "processing_carousel": "⏳ Procesando carrusel... espera.",
         "sending": "📤 Enviando video...",
         "sending_image": "📤 Enviando imagen...",
         "sending_carousel": "📤 Enviando carrusel...",
@@ -244,6 +252,8 @@ TEXTOS = {
             "⏳ आपका एक वीडियो पहले से प्रोसेस हो रहा है। कृपया प्रतीक्षा करें।"
         ),
         "processing": "⏳ वीडियो प्रोसेस हो रहा है... कृपया प्रतीक्षा करें।",
+        "processing_image": "⏳ तस्वीर प्रोसेस हो रही है... कृपया प्रतीक्षा करें।",
+        "processing_carousel": "⏳ कैरोसेल प्रोसेस हो रहा है... कृपया प्रतीक्षा करें।",
         "sending": "📤 वीडियो भेजा जा रहा है...",
         "sending_image": "📤 तस्वीर भेजी जा रही है...",
         "sending_carousel": "📤 कैरोसेल भेजा जा रहा है...",
@@ -284,6 +294,8 @@ TEXTOS = {
             "⏳ لديك فيديو قيد المعالجة بالفعل. يرجى الانتظار."
         ),
         "processing": "⏳ جارٍ معالجة الفيديو... يرجى الانتظار.",
+        "processing_image": "⏳ جارٍ معالجة الصورة... يرجى الانتظار.",
+        "processing_carousel": "⏳ جارٍ معالجة المنشور الدائري... يرجى الانتظار.",
         "sending": "📤 جارٍ إرسال الفيديو...",
         "sending_image": "📤 جارٍ إرسال الصورة...",
         "sending_carousel": "📤 جارٍ إرسال المنشور الدائري...",
@@ -902,26 +914,55 @@ async def download_video(
     request_token = object()
     usuarios_ocupados[user_id] = (request_token, agora)
 
+    # Descobre primeiro o tipo de mídia para mostrar
+    # a mensagem de processamento correta.
+    loop = asyncio.get_running_loop()
+    tipo_instagram = None
+
+    if plataforma == "instagram":
+        try:
+            tipo_instagram = await loop.run_in_executor(
+                None,
+                detectar_tipo_instagram,
+                url,
+            )
+        except Exception as e:
+            print(
+                f"Erro ao detectar Instagram: "
+                f"{type(e).__name__}: {e}"
+            )
+
+            await reagir_falha(update, context)
+
+            await update.message.reply_text(
+                t["unexpected"]
+            )
+
+            usuarios_ocupados.pop(user_id, None)
+            return
+
+    if tipo_instagram == "foto":
+        texto_processando = t["processing_image"]
+
+    elif tipo_instagram == "carrossel":
+        texto_processando = t["processing_carousel"]
+
+    else:
+        texto_processando = t["processing"]
+
     status_msg = await update.message.reply_text(
-        t["processing"]
+        texto_processando
     )
 
     pasta_temp = tempfile.mkdtemp(prefix="bot_video_")
     video_enviado = False
 
     try:
-        loop = asyncio.get_running_loop()
-
         # Instagram: fotos e carrosséis usam Instaloader.
         # Vídeos/Reels continuam usando o yt-dlp normalmente.
         resultado_instagram = None
 
         if plataforma == "instagram":
-            tipo_instagram = await loop.run_in_executor(
-                None,
-                detectar_tipo_instagram,
-                url,
-            )
 
             if tipo_instagram in ("foto", "carrossel"):
                 resultado_instagram = await loop.run_in_executor(
