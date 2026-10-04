@@ -1,4 +1,5 @@
 import uuid
+import base64
 import os
 import re
 import asyncio
@@ -553,6 +554,28 @@ def baixar_video(url, pasta_temp):
 # =========================================================
 
 def baixar_youtube(url, pasta_temp, modo):
+    # Cookies do YouTube ficam somente nas variáveis de ambiente.
+    cookies_base64 = os.getenv("YOUTUBE_COOKIES_BASE64")
+    cookies_path = None
+
+    if cookies_base64:
+        try:
+            cookies_bytes = base64.b64decode(cookies_base64)
+            cookies_path = os.path.join(
+                pasta_temp,
+                "youtube_cookies.txt",
+            )
+
+            with open(cookies_path, "wb") as arquivo_cookies:
+                arquivo_cookies.write(cookies_bytes)
+
+        except Exception as e:
+            print(
+                f"Falha ao preparar cookies do YouTube: "
+                f"{type(e).__name__}: {e}"
+            )
+            cookies_path = None
+
     if modo == "video":
         opcoes = {
             # Melhor vídeo MP4 + áudio compatível.
@@ -603,6 +626,9 @@ def baixar_youtube(url, pasta_temp, modo):
 
     else:
         raise ValueError("Modo do YouTube inválido.")
+
+    if cookies_path:
+        opcoes["cookiefile"] = cookies_path
 
     with yt_dlp.YoutubeDL(opcoes) as ydl:
         info = ydl.extract_info(url, download=True)
