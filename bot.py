@@ -486,6 +486,13 @@ def identificar_plataforma(url):
     if "pinterest.com" in url or "pin.it" in url:
         return "pinterest"
 
+    if (
+        "youtube.com" in url
+        or "youtu.be" in url
+        or "youtube-nocookie.com" in url
+    ):
+        return "youtube"
+
     return None
 
 
@@ -538,6 +545,285 @@ def baixar_video(url, pasta_temp):
         "Download concluído, mas nenhum arquivo final foi encontrado."
     )
 
+
+
+
+# =========================================================
+# DOWNLOAD DO YOUTUBE
+# =========================================================
+
+def baixar_youtube(url, pasta_temp, modo):
+    if modo == "video":
+        opcoes = {
+            # Melhor vídeo MP4 + áudio compatível.
+            # Se não houver streams separados adequados,
+            # usa o melhor MP4 disponível.
+            "format": (
+                "bestvideo[ext=mp4]+bestaudio[ext=m4a]/"
+                "best[ext=mp4]/best"
+            ),
+            "merge_output_format": "mp4",
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "socket_timeout": 30,
+            "retries": 3,
+            "fragment_retries": 3,
+            "extractor_retries": 3,
+            "restrictfilenames": True,
+            "outtmpl": os.path.join(
+                pasta_temp,
+                "youtube_%(id)s.%(ext)s",
+            ),
+        }
+
+    elif modo == "audio":
+        opcoes = {
+            "format": "bestaudio/best",
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "socket_timeout": 30,
+            "retries": 3,
+            "fragment_retries": 3,
+            "extractor_retries": 3,
+            "restrictfilenames": True,
+            "outtmpl": os.path.join(
+                pasta_temp,
+                "youtube_%(id)s.%(ext)s",
+            ),
+            "postprocessors": [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "192",
+                }
+            ],
+        }
+
+    else:
+        raise ValueError("Modo do YouTube inválido.")
+
+    with yt_dlp.YoutubeDL(opcoes) as ydl:
+        info = ydl.extract_info(url, download=True)
+
+    titulo = info.get("title") or "YouTube"
+    descricao = info.get("description") or titulo
+
+    arquivos = [
+        arquivo
+        for arquivo in Path(pasta_temp).iterdir()
+        if arquivo.is_file()
+        and not arquivo.name.endswith(".part")
+        and not arquivo.name.endswith(".ytdl")
+    ]
+
+    if not arquivos:
+        raise FileNotFoundError(
+            "O YouTube foi processado, mas nenhum arquivo final foi encontrado."
+        )
+
+    if modo == "audio":
+        mp3 = [
+            arquivo
+            for arquivo in arquivos
+            if arquivo.suffix.lower() == ".mp3"
+        ]
+
+        if mp3:
+            arquivo_final = max(
+                mp3,
+                key=lambda arquivo: arquivo.stat().st_size,
+            )
+        else:
+            arquivo_final = max(
+                arquivos,
+                key=lambda arquivo: arquivo.stat().st_size,
+            )
+
+    else:
+        videos = [
+            arquivo
+            for arquivo in arquivos
+            if arquivo.suffix.lower() in (
+                ".mp4",
+                ".mkv",
+                ".webm",
+                ".mov",
+            )
+        ]
+
+        if videos:
+            arquivo_final = max(
+                videos,
+                key=lambda arquivo: arquivo.stat().st_size,
+            )
+        else:
+            arquivo_final = max(
+                arquivos,
+                key=lambda arquivo: arquivo.stat().st_size,
+            )
+
+    return str(arquivo_final), titulo, descricao
+
+
+async def processar_youtube(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    url = context.user_data.get("youtube_url")
+
+    if not url:
+        await query.edit_message_text(
+            "Este link expirou. Envie o link do YouTube novamente."
+        )
+        return
+
+    if query.data == "youtube_video":
+        modo = "video"
+        texto = "⏳ Baixando vídeo do YouTube..."
+
+    elif query.data == "youtube_audio":
+        modo = "audio"
+        texto = "⏳ Baixando áudio do YouTube..."
+
+    else:
+        return
+
+    agora = asyncio.get_running_loop().time()
+    bloqueio = usuarios_ocupados.get(user_id)
+
+    if bloqueio:
+        _, inicio = bloqueio
+
+        if agora - inicio < 300:
+            await query.answer(
+                "Já existe um download em andamento.",
+                show_alert=True,
+            )
+            return
+
+        usuarios_ocupados.pop(user_id, None)
+
+    request_token = object()
+    usuarios_ocupados[user_id] = (request_token, agora)
+
+    pasta_temp = tempfile.mkdtemp(prefix="youtube_")
+
+    try:
+        await query.edit_message_text(texto)
+
+        loop = asyncio.get_running_loop()
+
+        filename, titulo, descricao = await loop.run_in_executor(
+            None,
+            baixar_youtube,
+            url,
+            pasta_temp,
+            modo,
+        )
+
+        if not os.path.exists(filename):
+            raise FileNotFoundError(
+                "Arquivo do YouTube não encontrado."
+            )
+
+        tamanho = os.path.getsize(filename)
+
+        if tamanho > MAX_FILE_SIZE:
+            await query.edit_message_text(
+                "❌ O arquivo ultrapassa o limite de envio do bot."
+            )
+            return
+
+        await query.edit_message_text("📤 Enviando...")
+
+        if modo == "audio":
+            with open(filename, "rb") as arquivo:
+                await context.bot.send_audio(
+                    chat_id=query.message.chat.id,
+                    audio=arquivo,
+                    title=titulo,
+                    read_timeout=120,
+                    write_timeout=120,
+                    connect_timeout=60,
+                    pool_timeout=60,
+                )
+
+        else:
+            with open(filename, "rb") as arquivo:
+                try:
+                    await context.bot.send_video(
+                        chat_id=query.message.chat.id,
+                        video=arquivo,
+                        supports_streaming=True,
+                        read_timeout=120,
+                        write_timeout=120,
+                        connect_timeout=60,
+                        pool_timeout=60,
+                    )
+
+                except Exception as erro_video:
+                    print(
+                        f"Falha ao enviar YouTube como vídeo: "
+                        f"{erro_video}"
+                    )
+
+                    arquivo.seek(0)
+
+                    await context.bot.send_document(
+                        chat_id=query.message.chat.id,
+                        document=arquivo,
+                        read_timeout=120,
+                        write_timeout=120,
+                        connect_timeout=60,
+                        pool_timeout=60,
+                    )
+
+        try:
+            await query.delete_message()
+        except Exception:
+            pass
+
+        context.user_data.pop("youtube_url", None)
+
+    except yt_dlp.utils.DownloadError as e:
+        print(f"Erro YouTube: {e}")
+
+        try:
+            await query.edit_message_text(
+                "❌ Não foi possível baixar este conteúdo do YouTube."
+            )
+        except Exception:
+            pass
+
+    except Exception as e:
+        print(
+            f"Erro inesperado YouTube: "
+            f"{type(e).__name__}: {e}"
+        )
+
+        try:
+            await query.edit_message_text(
+                "❌ Ocorreu um erro ao processar o YouTube."
+            )
+        except Exception:
+            pass
+
+    finally:
+        shutil.rmtree(
+            pasta_temp,
+            ignore_errors=True,
+        )
+
+        bloqueio_atual = usuarios_ocupados.get(user_id)
+
+        if (
+            bloqueio_atual
+            and bloqueio_atual[0] is request_token
+        ):
+            usuarios_ocupados.pop(user_id, None)
 
 
 # =========================================================
@@ -884,6 +1170,32 @@ async def download_video(
 
     if not url or not plataforma:
         await update.message.reply_text(t["invalid"])
+        return
+
+    # YouTube: pergunta o formato antes de iniciar o download.
+    if plataforma == "youtube":
+        teclado_youtube = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(
+                    "🎬 Vídeo",
+                    callback_data="youtube_video",
+                ),
+                InlineKeyboardButton(
+                    "🎵 Áudio",
+                    callback_data="youtube_audio",
+                ),
+            ]
+        ])
+
+        context.user_data["youtube_url"] = url
+
+        await update.message.reply_text(
+            "Como deseja baixar este conteúdo do YouTube?",
+            reply_markup=teclado_youtube,
+            reply_parameters=ReplyParameters(
+                message_id=update.message.message_id
+            ),
+        )
         return
 
     # Reage à mensagem que contém o link válido.
@@ -1293,6 +1605,13 @@ if __name__ == "__main__":
         CallbackQueryHandler(
             recriar_legenda,
             pattern=r"^recriar_legenda:",
+        )
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(
+            processar_youtube,
+            pattern=r"^youtube_(video|audio)$",
         )
     )
 
