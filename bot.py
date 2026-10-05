@@ -509,6 +509,10 @@ def baixar_video(url, pasta_temp):
         "fragment_retries": 3,
         "extractor_retries": 3,
         "restrictfilenames": True,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+        },
         "outtmpl": os.path.join(
             pasta_temp,
             "video_%(id)s.%(ext)s",
