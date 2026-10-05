@@ -1,5 +1,8 @@
 import uuid
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 import re
 import asyncio
 import tempfile
