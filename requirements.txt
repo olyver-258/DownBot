@@ -6,7 +6,7 @@ httpx==0.28.1
 idna==3.19
 python-telegram-bot==22.8
 typing_extensions==4.16.0
-yt-dlp==2026.8.19
+yt-dlp
 google-genai
 instaloader==4.15.3
 python-dotenv
