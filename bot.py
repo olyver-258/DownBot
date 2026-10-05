@@ -1,5 +1,6 @@
 import uuid
 import os
+import time
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -987,12 +988,18 @@ async def download_video(
                 )
 
         else:
+            inicio_download = time.monotonic()
+            print("📥 Iniciando download/processamento do vídeo...")
+
             filename, legenda = await loop.run_in_executor(
                 None,
                 baixar_video,
                 url,
                 pasta_temp,
             )
+
+            tempo_download = time.monotonic() - inicio_download
+            print(f"✅ Download/processamento concluído em {tempo_download:.2f}s")
 
         # A legenda original é sempre enviada separadamente.
 
