@@ -504,7 +504,7 @@ def baixar_video(url, pasta_temp):
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "socket_timeout": 30,
+        "socket_timeout": 60,
         "retries": 3,
         "fragment_retries": 3,
         "extractor_retries": 3,
