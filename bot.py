@@ -569,6 +569,11 @@ def detectar_tipo_instagram(url):
 
     shortcode = match.group(1)
 
+    # Reels vão diretamente para o yt-dlp.
+    # Não é necessário consultar o Instagram via Instaloader.
+    if "/reel/" in url.lower():
+        return "video"
+
     loader = instaloader.Instaloader(
         download_pictures=False,
         download_videos=False,
