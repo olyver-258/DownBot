@@ -1,6 +1,7 @@
 import uuid
 import os
 import time
+import json
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -28,6 +29,7 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
+    ApplicationHandlerStop,
     filters,
 )
 
@@ -57,10 +59,29 @@ MAX_FILE_SIZE = 49 * 1024 * 1024
 # user_id -> (token_da_requisicao, horario_inicio)
 usuarios_ocupados = {}
 
-idiomas_usuarios = {}# user_id -> idioma
-idiomas_usuarios = {}
+idiomas_usuarios = {}  # user_id -> idioma
 # Legenda original aguardando recriação pelo admin
 legendas_para_recriar = {}
+
+# CTA configurável pelo administrador, guardado num ficheiro local.
+CTA_CONFIG_PATH = Path(__file__).with_name("cta_config.json")
+
+
+def carregar_cta():
+    try:
+        with open(CTA_CONFIG_PATH, "r", encoding="utf-8") as arquivo:
+            dados = json.load(arquivo)
+        return str(dados.get("cta", "")).strip()
+    except (OSError, ValueError, TypeError):
+        return ""
+
+
+def guardar_cta(texto):
+    with open(CTA_CONFIG_PATH, "w", encoding="utf-8") as arquivo:
+        json.dump({"cta": texto}, arquivo, ensure_ascii=False, indent=2)
+
+
+cta_legenda = carregar_cta()
 
 
 # =========================================================
@@ -338,8 +359,6 @@ def teclado_idiomas():
     return ReplyKeyboardMarkup(
         [
             ["🇵🇹 Português", "🇬🇧 English"],
-            ["🇫🇷 Français", "🇪🇸 Español"],
-            ["🇮🇳 हिन्दी", "🇸🇦 العربية"],
         ],
         resize_keyboard=True,
         one_time_keyboard=True,
@@ -436,10 +455,6 @@ async def selecionar_idioma(
     idiomas = {
         "🇵🇹 Português": "pt",
         "🇬🇧 English": "en",
-        "🇫🇷 Français": "fr",
-        "🇪🇸 Español": "es",
-        "🇮🇳 हिन्दी": "hi",
-        "🇸🇦 العربية": "ar",
     }
 
     idioma = idiomas.get(escolha)
@@ -716,58 +731,74 @@ def baixar_instagram_instaloader(url, pasta_temp):
 # =========================================================
 
 async def recriar_legenda(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Mostra ao administrador a escolha do idioma da legenda recriada."""
     query = update.callback_query
     user_id = update.effective_user.id
 
-    idioma = obter_idioma(user_id)
-    t = TEXTOS[idioma]
-
-    # Segurança: somente o administrador pode usar a IA
     if user_id != ADMIN_ID:
-        await query.answer(
-            t["rewrite_private"],
-            show_alert=True,
-        )
+        idioma = obter_idioma(user_id)
+        await query.answer(TEXTOS[idioma]["rewrite_private"], show_alert=True)
         return
 
     await query.answer()
 
-    # Cada botão contém o ID da sua própria legenda.
     try:
         legenda_id = query.data.split(":", 1)[1]
     except (IndexError, AttributeError):
         legenda_id = None
 
-    dados_legenda = (
-        legendas_para_recriar.get(legenda_id)
-        if legenda_id
-        else None
+    dados_legenda = legendas_para_recriar.get(legenda_id) if legenda_id else None
+    if not dados_legenda or not dados_legenda.get("legenda"):
+        idioma = obter_idioma(user_id)
+        await query.edit_message_text(TEXTOS[idioma]["rewrite_not_found"])
+        return
+
+    teclado_idioma_legenda = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🇵🇹 Português", callback_data=f"recriar_idioma:pt:{legenda_id}"),
+            InlineKeyboardButton("🇬🇧 English", callback_data=f"recriar_idioma:en:{legenda_id}"),
+        ]
+    ])
+    await query.edit_message_text(
+        "🌍 Em que idioma queres recriar a legenda? / Which language should the caption use?",
+        reply_markup=teclado_idioma_legenda,
     )
 
-    if not dados_legenda:
-        legenda_original = None
-        video_message_id = None
-    else:
-        legenda_original = dados_legenda["legenda"]
-        video_message_id = dados_legenda["video_message_id"]
 
-    if not legenda_original:
-        await query.edit_message_text(
-            t["rewrite_not_found"]
-        )
+async def gerar_legenda_recriada(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = update.effective_user.id
+
+    idioma_usuario = obter_idioma(user_id)
+    t = TEXTOS[idioma_usuario]
+
+    if user_id != ADMIN_ID:
+        await query.answer(t["rewrite_private"], show_alert=True)
         return
+
+    await query.answer()
+
+    partes = (query.data or "").split(":", 2)
+    if len(partes) != 3 or partes[1] not in ("pt", "en"):
+        await query.edit_message_text("❌ Idioma inválido.")
+        return
+
+    idioma_resposta = {"pt": "português", "en": "English"}[partes[1]]
+    legenda_id = partes[2]
+    dados_legenda = legendas_para_recriar.get(legenda_id)
+
+    if not dados_legenda or not dados_legenda.get("legenda"):
+        await query.edit_message_text(t["rewrite_not_found"])
+        return
+
+    legenda_original = dados_legenda["legenda"]
+    video_message_id = dados_legenda["video_message_id"]
 
     if not gemini_client:
-        await query.edit_message_text(
-            t["rewrite_unavailable"]
-        )
+        await query.edit_message_text(t["rewrite_unavailable"])
         return
 
-    await query.edit_message_text(
-        t["rewrite_processing"]
-    )
-
-    idioma_resposta = t["rewrite_language"]
+    await query.edit_message_text(t["rewrite_processing"])
 
     prompt = f"""Sua única tarefa é reescrever a legenda fornecida abaixo.
 
@@ -797,8 +828,6 @@ LEGENDA ORIGINAL:
 """
 
     ultimo_erro = None
-
-    # Tenta novamente automaticamente caso o Gemini esteja sobrecarregado.
     for tentativa in range(3):
         try:
             resposta = await asyncio.to_thread(
@@ -806,69 +835,106 @@ LEGENDA ORIGINAL:
                 model="gemini-3.1-flash-lite",
                 contents=prompt,
             )
-
             nova_legenda = resposta.text
-
             if not nova_legenda:
-                raise ValueError(
-                    "Gemini retornou uma resposta vazia."
-                )
+                raise ValueError("Gemini retornou uma resposta vazia.")
 
-            # Remove o botão da mensagem original.
-            try:
-                await query.edit_message_reply_markup(
-                    reply_markup=None
-                )
-            except Exception as e:
-                if "message is not modified" not in str(e).lower():
-                    raise
+            cta = cta_legenda.strip()
+            if cta:
+                nova_legenda = f"{nova_legenda.rstrip()}\n\n{cta}"
 
-            # Envia a legenda recriada.
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=nova_legenda,
-                reply_parameters=ReplyParameters(
-                    message_id=video_message_id
-                ),
+                reply_parameters=ReplyParameters(message_id=video_message_id),
             )
 
-            # Confirmação no idioma selecionado.
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
                 text=t["rewrite_done"],
             )
 
-            # Apaga a mensagem temporária de processamento.
             try:
                 await query.message.delete()
             except Exception as e:
-                print(
-                    f"Erro ao apagar mensagem de processamento: {e}"
-                )
-
+                print(f"Erro ao apagar mensagem de processamento: {e}")
             return
 
         except Exception as e:
             ultimo_erro = e
             erro_texto = str(e).lower()
-
             if "503" in erro_texto or "unavailable" in erro_texto:
                 if tentativa < 2:
                     espera = 3 * (tentativa + 1)
-                    print(
-                        f"Gemini indisponível. "
-                        f"Nova tentativa em {espera}s."
-                    )
+                    print(f"Gemini indisponível. Nova tentativa em {espera}s.")
                     await asyncio.sleep(espera)
                     continue
-
             break
 
     print(f"Erro Gemini após tentativas: {ultimo_erro}")
+    await query.edit_message_text(t["rewrite_unavailable"])
 
-    await query.edit_message_text(
-        t["rewrite_unavailable"]
+
+async def comando_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("Esta função é privada.")
+        return
+
+    context.user_data["aguardando_cta"] = True
+    await update.message.reply_text(
+        "✍️ Envia agora o texto do CTA que será acrescentado às legendas recriadas. "
+        "Exemplo: Follow @Six7Live for more!\n\n"
+        "Usa /ctacancelar para cancelar."
     )
+
+
+async def receber_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Só intercepta texto quando o administrador está a configurar o CTA."""
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if not context.user_data.get("aguardando_cta"):
+        return
+
+    texto = (update.message.text or "").strip()
+    if not texto:
+        await update.message.reply_text("O CTA não pode estar vazio. Envia o texto ou usa /ctacancelar.")
+        raise ApplicationHandlerStop
+
+    global cta_legenda
+    try:
+        guardar_cta(texto)
+        cta_legenda = texto
+        context.user_data["aguardando_cta"] = False
+        await update.message.reply_text("✅ CTA guardado. Será acrescentado às próximas legendas recriadas.")
+    except OSError as e:
+        print(f"Erro ao guardar CTA: {e}")
+        await update.message.reply_text("❌ Não consegui guardar o CTA. Tenta novamente.")
+    raise ApplicationHandlerStop
+
+
+async def remover_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("Esta função é privada.")
+        return
+
+    global cta_legenda
+    context.user_data["aguardando_cta"] = False
+    cta_legenda = ""
+    try:
+        guardar_cta("")
+        await update.message.reply_text("✅ CTA removido. As próximas legendas serão enviadas sem CTA.")
+    except OSError as e:
+        print(f"Erro ao remover CTA: {e}")
+        await update.message.reply_text("❌ Não consegui guardar a alteração do CTA.")
+
+
+async def cancelar_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("Esta função é privada.")
+        return
+
+    context.user_data["aguardando_cta"] = False
+    await update.message.reply_text("Operação de CTA cancelada.")
 
 
 async def reagir_falha(update, context):
@@ -1298,11 +1364,23 @@ if __name__ == "__main__":
         CommandHandler("manutencao", manutencao)
     )
 
+    app.add_handler(CommandHandler("cta", comando_cta))
+    app.add_handler(CommandHandler("ctaremover", remover_cta))
+    app.add_handler(CommandHandler("ctacancelar", cancelar_cta))
+
+    # Este grupo só intercepta mensagens quando o administrador está a definir o CTA.
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & (~filters.COMMAND),
+            receber_cta,
+        ),
+        group=-1,
+    )
+
     app.add_handler(
         MessageHandler(
             filters.Regex(
-                r"^(🇵🇹 Português|🇬🇧 English|🇫🇷 Français|"
-                r"🇪🇸 Español|🇮🇳 हिन्दी|🇸🇦 العربية)$"
+                r"^(🇵🇹 Português|🇬🇧 English)$"
             ),
             selecionar_idioma,
         )
@@ -1312,6 +1390,13 @@ if __name__ == "__main__":
         CallbackQueryHandler(
             recriar_legenda,
             pattern=r"^recriar_legenda:",
+        )
+    )
+
+    app.add_handler(
+        CallbackQueryHandler(
+            gerar_legenda_recriada,
+            pattern=r"^recriar_idioma:",
         )
     )
 
