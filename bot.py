@@ -862,6 +862,12 @@ REGRAS DA REESCRITA:
 - Não invente informações.
 - Mantenha aproximadamente o mesmo nível de detalhe.
 - Adapte expressões para uma linguagem natural de redes sociais.
+- Identifique se a LEGENDA ORIGINAL contém chamadas para ação (CTA), como pedidos para seguir, subscrever, comentar, partilhar, gostar ou visitar um perfil.
+- Se houver CTA na legenda original, remova-o completamente da versão recriada. Não preserve nem reformule o CTA original.
+- Se não houver CTA original, não invente um CTA durante a recriação.
+- Não inclua nenhum CTA na resposta recriada. O bot acrescentará separadamente o CTA do perfil escolhido, se existir.
+- Se a legenda original não tiver CTA, preserve normalmente o restante conteúdo.
+- Não remova informações que não sejam chamadas para ação.
 - Não explique o que você fez.
 - Responda somente com a nova legenda.
 
