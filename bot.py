@@ -63,25 +63,25 @@ idiomas_usuarios = {}  # user_id -> idioma
 # Legenda original aguardando recriação pelo admin
 legendas_para_recriar = {}
 
-# CTA configurável pelo administrador, guardado num ficheiro local.
-CTA_CONFIG_PATH = Path(__file__).with_name("cta_config.json")
+# CTAs por perfil, guardadas separadamente para sobreviver a reinícios.
+CTA_CONFIG_PATH = Path(__file__).with_name("ctas.json")
 
 
-def carregar_cta():
+def carregar_ctas():
     try:
         with open(CTA_CONFIG_PATH, "r", encoding="utf-8") as arquivo:
             dados = json.load(arquivo)
-        return str(dados.get("cta", "")).strip()
+        return dados if isinstance(dados, dict) else {}
     except (OSError, ValueError, TypeError):
-        return ""
+        return {}
 
 
-def guardar_cta(texto):
+def guardar_ctas():
     with open(CTA_CONFIG_PATH, "w", encoding="utf-8") as arquivo:
-        json.dump({"cta": texto}, arquivo, ensure_ascii=False, indent=2)
+        json.dump(ctas_perfis, arquivo, ensure_ascii=False, indent=2)
 
 
-cta_legenda = carregar_cta()
+ctas_perfis = carregar_ctas()
 
 
 # =========================================================
@@ -129,6 +129,7 @@ TEXTOS = {
         "rewrite_unavailable": '❌ A IA está temporariamente indisponível. Tente novamente daqui a pouco.',
         "rewrite_private": 'Esta função é privada.',
         "rewrite_language": 'português',
+        "rewrite_language_prompt": '🌍 Em que idioma queres recriar a legenda?',
         "language": "🌍 Escolha o seu idioma:",
     },
 
@@ -172,6 +173,7 @@ TEXTOS = {
         "rewrite_unavailable": '❌ AI is temporarily unavailable. Please try again later.',
         "rewrite_private": 'This feature is private.',
         "rewrite_language": 'English',
+        "rewrite_language_prompt": '🌍 Which language should the caption use?',
         "language": "🌍 Choose your language:",
     },
 
@@ -217,6 +219,7 @@ TEXTOS = {
         "rewrite_unavailable": "❌ L'IA est temporairement indisponible. Réessayez plus tard.",
         "rewrite_private": 'Cette fonctionnalité est privée.',
         "rewrite_language": 'français',
+        "rewrite_language_prompt": '🌍 Dans quelle langue veux-tu réécrire la légende ?',
         "language": "🌍 Choisissez votre langue :",
     },
 
@@ -261,6 +264,7 @@ TEXTOS = {
         "rewrite_unavailable": '❌ La IA no está disponible temporalmente. Inténtalo de nuevo más tarde.',
         "rewrite_private": 'Esta función es privada.',
         "rewrite_language": 'español',
+        "rewrite_language_prompt": '🌍 ¿En qué idioma quieres reescribir el texto?',
         "language": "🌍 Elige tu idioma:",
     },
 
@@ -303,6 +307,7 @@ TEXTOS = {
         "rewrite_unavailable": '❌ AI अस्थायी रूप से उपलब्ध नहीं है। कृपया बाद में फिर कोशिश करें।',
         "rewrite_private": 'यह सुविधा निजी है।',
         "rewrite_language": 'हिन्दी',
+        "rewrite_language_prompt": '🌍 आप कैप्शन किस भाषा में दोबारा लिखना चाहते हैं?',
         "language": "🌍 अपनी भाषा चुनें:",
     },
 
@@ -346,6 +351,7 @@ TEXTOS = {
         "rewrite_unavailable": '❌ الذكاء الاصطناعي غير متاح مؤقتًا. حاول مرة أخرى لاحقًا.',
         "rewrite_private": 'هذه الميزة خاصة.',
         "rewrite_language": 'العربية',
+        "rewrite_language_prompt": '🌍 بأي لغة تريد إعادة صياغة الوصف؟',
         "language": "🌍 اختر لغتك:",
     },
 }
@@ -370,11 +376,15 @@ def obter_idioma(user_id):
 
 
 async def configurar_menu(app):
+    # Os comandos aparecem no menu do Telegram; os comandos administrativos
+    # também ficam visíveis no menu principal deste bot.
     comandos = [
         BotCommand("start", "🚀 Iniciar o bot"),
         BotCommand("language", "🌍 Mudar idioma"),
+        BotCommand("cta", "📋 Listar/remover CTAs"),
+        BotCommand("config_cta", "⚙️ Configurar CTA por perfil"),
+        BotCommand("ctacancelar", "✖️ Cancelar configuração de CTA"),
     ]
-
     await app.bot.set_my_commands(comandos)
 
 
@@ -759,8 +769,12 @@ async def recriar_legenda(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🇬🇧 English", callback_data=f"recriar_idioma:en:{legenda_id}"),
         ]
     ])
+    idioma_usuario = obter_idioma(user_id)
+    texto_prompt = TEXTOS.get(idioma_usuario, TEXTOS["pt"]).get(
+        "rewrite_language_prompt", "🌍 Em que idioma queres recriar a legenda?"
+    )
     await query.edit_message_text(
-        "🌍 Em que idioma queres recriar a legenda? / Which language should the caption use?",
+        texto_prompt,
         reply_markup=teclado_idioma_legenda,
     )
 
@@ -778,13 +792,43 @@ async def gerar_legenda_recriada(update: Update, context: ContextTypes.DEFAULT_T
 
     await query.answer()
 
-    partes = (query.data or "").split(":", 2)
-    if len(partes) != 3 or partes[1] not in ("pt", "en"):
+    partes = (query.data or "").split(":")
+    if len(partes) < 3 or partes[1] not in ("pt", "en"):
         await query.edit_message_text("❌ Idioma inválido.")
         return
 
     idioma_resposta = {"pt": "português", "en": "English"}[partes[1]]
     legenda_id = partes[2]
+    if partes[0] == "recriar_idioma":
+        botoes = []
+        for perfil_id, perfil in ctas_perfis.items():
+            nome = str(perfil.get("nome", "Perfil"))[:35]
+            idioma_cta = str(perfil.get("idioma", "pt")).upper()
+            botoes.append([InlineKeyboardButton(
+                f"{nome} · CTA {idioma_cta}",
+                callback_data=f"recriar_perfil:{partes[1]}:{legenda_id}:{perfil_id}",
+            )])
+        botoes.append([InlineKeyboardButton(
+            "⏭️ Continuar sem CTA",
+            callback_data=f"recriar_perfil:{partes[1]}:{legenda_id}:sem_cta",
+        )])
+        await query.edit_message_text(
+            "👤 Escolhe o perfil cuja CTA será acrescentada à legenda:",
+            reply_markup=InlineKeyboardMarkup(botoes),
+        )
+        return
+    if partes[0] != "recriar_perfil" or len(partes) != 4:
+        await query.edit_message_text("❌ Opção inválida.")
+        return
+    perfil_id = partes[3]
+    cta_escolhida = ""
+    if perfil_id != "sem_cta":
+        perfil = ctas_perfis.get(perfil_id)
+        if not perfil:
+            await query.edit_message_text("❌ Esse perfil já não existe. Tenta recriar a legenda novamente.")
+            return
+        cta_escolhida = str(perfil.get("texto", "")).strip()
+
     dados_legenda = legendas_para_recriar.get(legenda_id)
 
     if not dados_legenda or not dados_legenda.get("legenda"):
@@ -839,9 +883,8 @@ LEGENDA ORIGINAL:
             if not nova_legenda:
                 raise ValueError("Gemini retornou uma resposta vazia.")
 
-            cta = cta_legenda.strip()
-            if cta:
-                nova_legenda = f"{nova_legenda.rstrip()}\n\n{cta}"
+            if cta_escolhida:
+                nova_legenda = f"{nova_legenda.rstrip()}\n\n{cta_escolhida}"
 
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
@@ -880,61 +923,123 @@ async def comando_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Esta função é privada.")
         return
 
-    context.user_data["aguardando_cta"] = True
+    if not ctas_perfis:
+        await update.message.reply_text(
+            "📋 Ainda não há CTAs configuradas. Usa /config_cta para criar a primeira."
+        )
+        return
+
+    linhas = []
+    botoes = []
+    for perfil_id, perfil in ctas_perfis.items():
+        nome = str(perfil.get("nome", "Perfil"))
+        idioma = str(perfil.get("idioma", "pt")).upper()
+        texto = str(perfil.get("texto", ""))
+        linhas.append(f"👤 {nome} · {idioma}\n{texto}")
+        botoes.append([InlineKeyboardButton(
+            f"🗑 Remover {nome[:30]}", callback_data=f"cta_remover:{perfil_id}"
+        )])
+    botoes.append([InlineKeyboardButton("✖️ Fechar", callback_data="cta_fechar")])
     await update.message.reply_text(
-        "✍️ Envia agora o texto do CTA que será acrescentado às legendas recriadas. "
-        "Exemplo: Follow @Six7Live for more!\n\n"
+        "📋 CTAs disponíveis:\n\n" + "\n\n".join(linhas),
+        reply_markup=InlineKeyboardMarkup(botoes),
+    )
+
+
+async def configurar_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("Esta função é privada.")
+        return
+    context.user_data["configurando_cta"] = "nome"
+    context.user_data.pop("cta_nova", None)
+    await update.message.reply_text(
+        "⚙️ Vamos configurar uma CTA nova.\n\n"
+        "1/3 — Envia o nome do perfil (ex.: Six7Live).\n"
         "Usa /ctacancelar para cancelar."
     )
 
 
-async def receber_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Só intercepta texto quando o administrador está a configurar o CTA."""
+async def receber_config_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
-    if not context.user_data.get("aguardando_cta"):
+    etapa = context.user_data.get("configurando_cta")
+    if not etapa:
         return
-
     texto = (update.message.text or "").strip()
     if not texto:
-        await update.message.reply_text("O CTA não pode estar vazio. Envia o texto ou usa /ctacancelar.")
+        await update.message.reply_text("O campo não pode ficar vazio. Envia novamente ou usa /ctacancelar.")
         raise ApplicationHandlerStop
 
-    global cta_legenda
-    try:
-        guardar_cta(texto)
-        cta_legenda = texto
-        context.user_data["aguardando_cta"] = False
-        await update.message.reply_text("✅ CTA guardado. Será acrescentado às próximas legendas recriadas.")
-    except OSError as e:
-        print(f"Erro ao guardar CTA: {e}")
-        await update.message.reply_text("❌ Não consegui guardar o CTA. Tenta novamente.")
+    if etapa == "nome":
+        context.user_data["cta_nova"] = {"nome": texto}
+        context.user_data["configurando_cta"] = "idioma"
+        teclado = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🇵🇹 Português", callback_data="cta_idioma:pt"),
+            InlineKeyboardButton("🇬🇧 English", callback_data="cta_idioma:en"),
+        ]])
+        await update.message.reply_text("2/3 — Escolhe o idioma da CTA:", reply_markup=teclado)
+    elif etapa == "texto":
+        perfil = context.user_data.get("cta_nova", {})
+        perfil["texto"] = texto
+        perfil_id = uuid.uuid4().hex[:10]
+        ctas_perfis[perfil_id] = perfil
+        try:
+            guardar_ctas()
+            context.user_data.pop("cta_nova", None)
+            context.user_data.pop("configurando_cta", None)
+            await update.message.reply_text(
+                f"✅ CTA criada!\nPerfil: {perfil['nome']}\nIdioma: {perfil['idioma'].upper()}\n\n"
+                "Podes consultar ou remover em /cta."
+            )
+        except OSError as e:
+            ctas_perfis.pop(perfil_id, None)
+            print(f"Erro ao guardar CTAs: {e}")
+            await update.message.reply_text("❌ Não consegui guardar a CTA. Tenta novamente.")
     raise ApplicationHandlerStop
 
 
-async def remover_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def callbacks_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
     if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("Esta função é privada.")
+        await query.answer("Esta função é privada.", show_alert=True)
         return
-
-    global cta_legenda
-    context.user_data["aguardando_cta"] = False
-    cta_legenda = ""
-    try:
-        guardar_cta("")
-        await update.message.reply_text("✅ CTA removido. As próximas legendas serão enviadas sem CTA.")
-    except OSError as e:
-        print(f"Erro ao remover CTA: {e}")
-        await update.message.reply_text("❌ Não consegui guardar a alteração do CTA.")
+    await query.answer()
+    data = query.data or ""
+    if data.startswith("cta_idioma:"):
+        idioma = data.split(":", 1)[1]
+        if idioma not in ("pt", "en") or context.user_data.get("configurando_cta") != "idioma":
+            await query.edit_message_text("❌ Configuração expirada. Usa /config_cta novamente.")
+            return
+        context.user_data["cta_nova"]["idioma"] = idioma
+        context.user_data["configurando_cta"] = "texto"
+        await query.edit_message_text(
+            "3/3 — Envia agora o texto completo da CTA para esse perfil.\n"
+            "Ex.: Follow @Six7Live for more!\n\nUsa /ctacancelar para cancelar."
+        )
+    elif data.startswith("cta_remover:"):
+        perfil_id = data.split(":", 1)[1]
+        perfil = ctas_perfis.pop(perfil_id, None)
+        if not perfil:
+            await query.edit_message_text("Esse perfil já não existe.")
+            return
+        try:
+            guardar_ctas()
+            await query.edit_message_text(f"✅ CTA do perfil {perfil.get('nome', 'Perfil')} removida.")
+        except OSError as e:
+            ctas_perfis[perfil_id] = perfil
+            print(f"Erro ao remover CTA: {e}")
+            await query.edit_message_text("❌ Não consegui remover a CTA.")
+    elif data == "cta_fechar":
+        await query.edit_message_text("Lista de CTAs fechada.")
 
 
 async def cancelar_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("Esta função é privada.")
         return
-
-    context.user_data["aguardando_cta"] = False
-    await update.message.reply_text("Operação de CTA cancelada.")
+    context.user_data.pop("configurando_cta", None)
+    context.user_data.pop("cta_nova", None)
+    await update.message.reply_text("Configuração de CTA cancelada.")
 
 
 async def reagir_falha(update, context):
@@ -1365,15 +1470,13 @@ if __name__ == "__main__":
     )
 
     app.add_handler(CommandHandler("cta", comando_cta))
-    app.add_handler(CommandHandler("ctaremover", remover_cta))
+    app.add_handler(CommandHandler("config_cta", configurar_cta))
     app.add_handler(CommandHandler("ctacancelar", cancelar_cta))
+    app.add_handler(CallbackQueryHandler(callbacks_cta, pattern=r"^(cta_idioma:|cta_remover:|cta_fechar)"))
 
-    # Este grupo só intercepta mensagens quando o administrador está a definir o CTA.
+    # Só intercepta mensagens quando há uma configuração CTA em curso.
     app.add_handler(
-        MessageHandler(
-            filters.TEXT & (~filters.COMMAND),
-            receber_cta,
-        ),
+        MessageHandler(filters.TEXT & (~filters.COMMAND), receber_config_cta),
         group=-1,
     )
 
@@ -1396,7 +1499,7 @@ if __name__ == "__main__":
     app.add_handler(
         CallbackQueryHandler(
             gerar_legenda_recriada,
-            pattern=r"^recriar_idioma:",
+            pattern=r"^recriar_(idioma|perfil):",
         )
     )
 
