@@ -601,7 +601,7 @@ def detectar_tipo_instagram(url):
     # Reels vão diretamente para o yt-dlp.
     # Não é necessário consultar o Instagram via Instaloader.
     if "/reel/" in url.lower():
-        return "video"
+        return "video", None
 
     loader = instaloader.Instaloader(
         download_pictures=False,
@@ -620,15 +620,15 @@ def detectar_tipo_instagram(url):
     )
 
     if post.typename == "GraphSidecar":
-        return "carrossel"
+        return "carrossel", post
 
     if post.is_video:
-        return "video"
+        return "video", post
 
-    return "foto"
+    return "foto", post
 
 
-def baixar_instagram_instaloader(url, pasta_temp):
+def baixar_instagram_instaloader(url, pasta_temp, post=None):
     # Aceita links /p/ e /reel/ e extrai o shortcode.
     match = re.search(
         r"instagram\.com/(?:p|reel)/([^/?#]+)",
@@ -641,21 +641,24 @@ def baixar_instagram_instaloader(url, pasta_temp):
 
     shortcode = match.group(1)
 
-    loader = instaloader.Instaloader(
-        download_pictures=False,
-        download_videos=False,
-        download_video_thumbnails=False,
-        download_geotags=False,
-        download_comments=False,
-        save_metadata=False,
-        compress_json=False,
-        quiet=True,
-    )
+    # Reutiliza o post já consultado na detecção do tipo.
+    # Isso evita uma segunda chamada GraphQL ao Instagram.
+    if post is None:
+        loader = instaloader.Instaloader(
+            download_pictures=False,
+            download_videos=False,
+            download_video_thumbnails=False,
+            download_geotags=False,
+            download_comments=False,
+            save_metadata=False,
+            compress_json=False,
+            quiet=True,
+        )
 
-    post = instaloader.Post.from_shortcode(
-        loader.context,
-        shortcode,
-    )
+        post = instaloader.Post.from_shortcode(
+            loader.context,
+            shortcode,
+        )
 
     legenda = post.caption or ""
 
@@ -1108,10 +1111,11 @@ async def download_video(
     # a mensagem de processamento correta.
     loop = asyncio.get_running_loop()
     tipo_instagram = None
+    post_instagram = None
 
     if plataforma == "instagram":
         try:
-            tipo_instagram = await loop.run_in_executor(
+            tipo_instagram, post_instagram = await loop.run_in_executor(
                 None,
                 detectar_tipo_instagram,
                 url,
@@ -1160,6 +1164,7 @@ async def download_video(
                     baixar_instagram_instaloader,
                     url,
                     pasta_temp,
+                    post_instagram,
                 )
 
                 legenda = resultado_instagram["legenda"]
