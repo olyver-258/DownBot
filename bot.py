@@ -12,6 +12,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from telegram.helpers import escape_markdown
 from telegram import (
     Update,
     ReplyKeyboardMarkup,
@@ -1314,6 +1315,16 @@ LEGENDA ORIGINAL:
 # GESTÃO PROFISSIONAL DE CTAs
 # =========================================================
 
+def normalizar_username_instagram(valor):
+    """Valida o formato do username do Instagram sem rejeitar '_' ou '.'."""
+    username = str(valor or "").strip()
+    if username.startswith("@"):
+        username = username[1:]
+    if not re.fullmatch(r"[A-Za-z0-9._]{1,30}", username):
+        return None
+    return username
+
+
 def _montar_painel_ctas():
     """Painel compacto de perfis e respetivos modos de CTA."""
     if not ctas_perfis:
@@ -1331,7 +1342,7 @@ def _montar_painel_ctas():
         idioma = str(perfil.get("idioma", "pt")).upper()
         bandeira = "🇵🇹" if idioma == "PT" else "🇬🇧"
         modo = "🤝 Contextual" if perfil.get("modo") == "contextual" else "📌 Fixa"
-        linhas.append(f"• **{nome}** · {bandeira} {idioma} · {modo}")
+        linhas.append(f"• **{escape_markdown(nome)}** · {bandeira} {idioma} · {modo}")
         botoes.append([
             InlineKeyboardButton(f"🔄 Modo · {nome[:12]}", callback_data=f"cta_alternar_modo:{perfil_id}"),
             InlineKeyboardButton(f"🗑 Remover · {nome[:12]}", callback_data=f"cta_remover:{perfil_id}"),
@@ -1417,7 +1428,14 @@ async def receber_config_cta(update: Update, context: ContextTypes.DEFAULT_TYPE)
         raise ApplicationHandlerStop
 
     if etapa == "nome":
-        nome_limpo = texto.lstrip("@").strip() or texto
+        nome_limpo = normalizar_username_instagram(texto)
+        if not nome_limpo:
+            await editar_prompt_cta(
+                context, update.effective_chat.id, context.user_data,
+                "⚠️ Username inválido. Envia apenas letras, números, ponto (.) ou sublinhado (_), com até 30 caracteres. Exemplo: @_papishow",
+            )
+            raise ApplicationHandlerStop
+
         context.user_data["cta_nova"] = {"nome": nome_limpo}
         context.user_data["configurando_cta"] = "idioma"
         teclado = InlineKeyboardMarkup([[
@@ -1426,7 +1444,7 @@ async def receber_config_cta(update: Update, context: ContextTypes.DEFAULT_TYPE)
         ]])
         await editar_prompt_cta(
             context, update.effective_chat.id, context.user_data,
-            f"**2/4** Idioma da CTA para **@{nome_limpo}**:",
+            f"**2/4** Idioma da CTA para **@{escape_markdown(nome_limpo)}**:",
             parse_mode="Markdown", reply_markup=teclado,
         )
 
@@ -1514,7 +1532,7 @@ async def callbacks_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if cat == "personalizada":
             context.user_data["configurando_cta"] = "texto"
             await query.edit_message_text(
-                f"✍️ Envia o texto da CTA para **@{nome_perfil}**.\n"
+                f"✍️ Envia o texto da CTA para **@{escape_markdown(nome_perfil)}**.\n"
                 "Cancelar: /ctacancelar",
                 parse_mode="Markdown",
             )
@@ -1529,8 +1547,8 @@ async def callbacks_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("✅ Usar modelo", callback_data="cta_usar_sugestao")],
         ])
         await query.edit_message_text(
-            f"💡 **Sugestão para @{nome_perfil}:**\n"
-            f"`{sugestao}`\n\n"
+            f"💡 **Sugestão para @{escape_markdown(nome_perfil)}:**\n"
+            f"{escape_markdown(sugestao)}\n\n"
             "Usa o modelo ou envia outro texto.",
             parse_mode="Markdown",
             reply_markup=teclado_sugestao,
@@ -1569,10 +1587,10 @@ async def callbacks_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
             modo_str = "🤝 Conexão Contextual com IA" if modo == "contextual" else "📌 Assinatura Fixa"
             await query.edit_message_text(
                 f"✅ **CTA profissional configurada com sucesso!**\n\n"
-                f"👤 **Perfil:** {perfil['nome']}\n"
-                f"🌍 **Idioma:** {perfil['idioma'].upper()}\n"
+                f"👤 **Perfil:** @{escape_markdown(perfil['nome'])}\n"
+                f"🌍 **Idioma:** {escape_markdown(perfil['idioma'].upper())}\n"
                 f"⚙️ **Inserção:** {modo_str}\n"
-                f"📝 **Texto:** `{perfil['texto']}`\n\n"
+                f"📝 **Texto:** {escape_markdown(perfil['texto'])}\n\n"
                 "Gerencie todas as suas CTAs em /cta.",
                 parse_mode="Markdown",
             )
