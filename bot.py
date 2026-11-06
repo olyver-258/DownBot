@@ -245,6 +245,90 @@ def obter_idioma(user_id):
     return idioma if idioma in TEXTOS else "pt"
 
 
+async def apagar_mensagem_depois(bot, chat_id, message_id, segundos=10):
+    """Apaga mensagens temporárias sem bloquear o processamento principal."""
+    await asyncio.sleep(segundos)
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception:
+        pass
+
+
+async def apagar_comando(update):
+    """Remove o comando enviado pelo utilizador, quando possível."""
+    mensagem = update.effective_message
+    if mensagem:
+        try:
+            await mensagem.delete()
+        except Exception:
+            pass
+
+
+async def resposta_temporaria(update, context, texto, segundos=10, **kwargs):
+    """Envia uma resposta curta e agenda a sua remoção."""
+    mensagem = await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=texto,
+        **kwargs,
+    )
+    context.application.create_task(
+        apagar_mensagem_depois(
+            context.bot,
+            update.effective_chat.id,
+            mensagem.message_id,
+            segundos,
+        )
+    )
+    return mensagem
+
+
+async def remover_botao_clicado(query):
+    """Remove apenas o botão usado, mantendo os restantes na mesma mensagem."""
+    mensagem = query.message
+    teclado_atual = getattr(mensagem, "reply_markup", None)
+    if not teclado_atual:
+        return
+
+    novas_linhas = []
+    for linha in teclado_atual.inline_keyboard:
+        restantes = [
+            botao for botao in linha
+            if getattr(botao, "callback_data", None) != query.data
+        ]
+        if restantes:
+            novas_linhas.append(restantes)
+
+    novo_teclado = InlineKeyboardMarkup(novas_linhas) if novas_linhas else None
+    try:
+        await query.edit_message_reply_markup(reply_markup=novo_teclado)
+    except Exception as e:
+        print(f"Não foi possível actualizar os botões: {e}")
+
+
+async def editar_prompt_cta(context, chat_id, user_data, texto, **kwargs):
+    """Actualiza a mesma mensagem durante a configuração de uma CTA."""
+    message_id = user_data.get("cta_prompt_message_id")
+    if message_id:
+        try:
+            return await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=texto,
+                **kwargs,
+            )
+        except Exception as e:
+            if "message is not modified" in str(e).lower():
+                return None
+            print(f"Não foi possível actualizar o prompt da CTA: {e}")
+    mensagem = await context.bot.send_message(
+        chat_id=chat_id,
+        text=texto,
+        **kwargs,
+    )
+    user_data["cta_prompt_message_id"] = mensagem.message_id
+    return mensagem
+
+
 async def configurar_menu(app):
     comandos = [
         BotCommand("start", "🚀 Iniciar o bot"),
@@ -262,6 +346,7 @@ async def configurar_menu(app):
 
 async def manutencao(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
+        await apagar_comando(update)
         return
 
     enviados = 0
@@ -281,27 +366,37 @@ async def manutencao(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"Erro ao avisar {user_id}: {e}")
             falhas += 1
 
-    await update.message.reply_text(
+    await apagar_comando(update)
+    await resposta_temporaria(
+        update,
+        context,
         f"📢 Aviso enviado!\n"
         f"✅ Enviados: {enviados}\n"
-        f"❌ Falhas: {falhas}"
+        f"❌ Falhas: {falhas}",
     )
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
+        await apagar_comando(update)
         return
 
-    await update.message.reply_text(
+    await apagar_comando(update)
+    await resposta_temporaria(
+        update,
+        context,
         "📊 Estatísticas do bot\n\n"
         f"👥 Usuários nesta sessão: {len(idiomas_usuarios)}\n"
-        f"⏳ Downloads ativos: {len(usuarios_ocupados)}"
+        f"⏳ Downloads ativos: {len(usuarios_ocupados)}",
     )
 
 
 async def meu_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        f"🆔 Seu Telegram User ID é: {update.effective_user.id}"
+    await apagar_comando(update)
+    await resposta_temporaria(
+        update,
+        context,
+        f"🆔 Seu Telegram User ID é: {update.effective_user.id}",
     )
 
 
@@ -309,18 +404,33 @@ async def meu_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # /START E /LANGUAGE
 # =========================================================
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🌍 Escolha o seu idioma / Choose your language:",
+async def _mostrar_menu_idioma(update, context):
+    await apagar_comando(update)
+    for chave in ("menu_idioma_message_id", "welcome_message_id"):
+        anterior = context.user_data.pop(chave, None)
+        if anterior:
+            try:
+                await context.bot.delete_message(
+                    chat_id=update.effective_chat.id,
+                    message_id=anterior,
+                )
+            except Exception:
+                pass
+
+    mensagem = await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="🌍 Escolha o seu idioma / Choose your language:",
         reply_markup=teclado_idiomas(),
     )
+    context.user_data["menu_idioma_message_id"] = mensagem.message_id
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await _mostrar_menu_idioma(update, context)
 
 
 async def language(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🌍 Escolha o seu idioma / Choose your language:",
-        reply_markup=teclado_idiomas(),
-    )
+    await _mostrar_menu_idioma(update, context)
 
 
 async def selecionar_idioma(
@@ -342,10 +452,27 @@ async def selecionar_idioma(
 
     idiomas_usuarios[user_id] = idioma
 
-    await update.message.reply_text(
-        TEXTOS[idioma]["welcome"],
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    menu_id = context.user_data.pop("menu_idioma_message_id", None)
+    if menu_id:
+        try:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=menu_id,
+            )
+        except Exception:
+            pass
+
+    mensagem_boas_vindas = await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=TEXTOS[idioma]["welcome"],
         reply_markup=ReplyKeyboardRemove(),
     )
+    context.user_data["welcome_message_id"] = mensagem_boas_vindas.message_id
 
 
 # =========================================================
@@ -691,6 +818,7 @@ async def analisar_texto_video(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     await query.answer()
+    await remover_botao_clicado(query)
 
     try:
         video_id = query.data.split(":", 1)[1]
@@ -699,17 +827,11 @@ async def analisar_texto_video(update: Update, context: ContextTypes.DEFAULT_TYP
 
     dados_video = videos_para_analisar.get(video_id) if video_id else None
     if not dados_video:
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=t["video_not_found"],
-        )
+        await resposta_temporaria(update, context, t["video_not_found"])
         return
 
     if not gemini_client:
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=t["rewrite_unavailable"],
-        )
+        await resposta_temporaria(update, context, t["rewrite_unavailable"])
         return
 
     msg_status = await context.bot.send_message(
@@ -768,6 +890,9 @@ async def analisar_texto_video(update: Update, context: ContextTypes.DEFAULT_TYP
 
         if not texto_extraido or any(marcador in texto_extraido for marcador in ("NENHUMA_LEGENDA_ENCONTRADA", "NENHUM_TEXTO_ENCONTRADO")):
             await msg_status.edit_text(t["video_text_empty"])
+            context.application.create_task(
+                apagar_mensagem_depois(context.bot, update.effective_chat.id, msg_status.message_id, 12)
+            )
             return
 
         # Registra o texto extraído no dicionário de legendas para permitir Traduzir ou Reescrever com CTA
@@ -799,6 +924,9 @@ async def analisar_texto_video(update: Update, context: ContextTypes.DEFAULT_TYP
         print(f"Erro ao analisar texto do vídeo: {e}")
         try:
             await msg_status.edit_text(t["rewrite_unavailable"])
+            context.application.create_task(
+                apagar_mensagem_depois(context.bot, update.effective_chat.id, msg_status.message_id, 12)
+            )
         except Exception:
             pass
     finally:
@@ -817,6 +945,7 @@ async def iniciar_traducao_extraido(update: Update, context: ContextTypes.DEFAUL
         return
 
     await query.answer()
+    await remover_botao_clicado(query)
 
     try:
         legenda_id = query.data.split(":", 1)[1]
@@ -844,7 +973,7 @@ async def iniciar_traducao_extraido(update: Update, context: ContextTypes.DEFAUL
 
 
 async def executar_traducao_extraido(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Traduz o texto extraído sem apagar a legenda original."""
+    """Traduz o texto extraído e actualiza a própria mensagem do menu."""
     query = update.callback_query
     user_id = update.effective_user.id
     idioma_usuario = obter_idioma(user_id)
@@ -858,7 +987,7 @@ async def executar_traducao_extraido(update: Update, context: ContextTypes.DEFAU
 
     partes = (query.data or "").split(":")
     if len(partes) != 3 or partes[1] not in ("pt", "en"):
-        await query.answer("Idioma inválido.", show_alert=True)
+        await query.edit_message_text("Idioma inválido.")
         return
 
     idioma_destino = {"pt": "português", "en": "English"}[partes[1]]
@@ -866,28 +995,17 @@ async def executar_traducao_extraido(update: Update, context: ContextTypes.DEFAU
     dados_legenda = legendas_para_recriar.get(legenda_id)
 
     if not dados_legenda or not dados_legenda.get("legenda"):
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=t["rewrite_not_found"],
-            reply_parameters=ReplyParameters(message_id=query.message.message_id),
-        )
+        await query.edit_message_text(t["rewrite_not_found"])
         return
 
     if not gemini_client:
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=t["rewrite_unavailable"],
-            reply_parameters=ReplyParameters(message_id=query.message.message_id),
-        )
+        await query.edit_message_text(t["rewrite_unavailable"])
         return
 
     texto_original = dados_legenda["legenda"]
     video_message_id = dados_legenda["video_message_id"]
-    status_msg = await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=t["translating_text"],
-        reply_parameters=ReplyParameters(message_id=query.message.message_id),
-    )
+
+    await query.edit_message_text(t["translating_text"])
 
     prompt = f"""Traduza fielmente o texto abaixo para {idioma_destino}.
 
@@ -924,17 +1042,14 @@ TEXTO PARA TRADUZIR:
             )
         ]])
 
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=f"{t['translated_done']}\n\n{texto_traduzido}",
+        await query.edit_message_text(
+            f"{t['translated_done']}\\n\\n{texto_traduzido}",
             reply_markup=teclado_reescrever,
-            reply_parameters=ReplyParameters(message_id=query.message.message_id),
         )
-        await status_msg.delete()
     except Exception as e:
         print(f"Erro ao traduzir texto extraído: {e}")
         try:
-            await status_msg.edit_text(t["rewrite_unavailable"])
+            await query.edit_message_text(t["rewrite_unavailable"])
         except Exception:
             pass
 
@@ -954,6 +1069,7 @@ async def recriar_legenda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await query.answer()
+    await remover_botao_clicado(query)
 
     try:
         legenda_id = query.data.split(":", 1)[1]
@@ -963,10 +1079,10 @@ async def recriar_legenda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     dados_legenda = legendas_para_recriar.get(legenda_id) if legenda_id else None
     if not dados_legenda or not dados_legenda.get("legenda"):
         idioma = obter_idioma(user_id)
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=TEXTOS[idioma]["rewrite_not_found"],
-            reply_parameters=ReplyParameters(message_id=query.message.message_id),
+        await resposta_temporaria(
+            update,
+            context,
+            TEXTOS[idioma]["rewrite_not_found"],
         )
         return
 
@@ -1139,15 +1255,15 @@ LEGENDA ORIGINAL:
                 reply_parameters=ReplyParameters(message_id=video_message_id),
             )
 
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=t["rewrite_done"],
-            )
-
             try:
                 await mensagem_processamento.delete()
             except Exception as e:
                 print(f"Erro ao apagar mensagem de processamento: {e}")
+
+            try:
+                await query.edit_message_text(t["rewrite_done"])
+            except Exception:
+                pass
             return
 
         except Exception as e:
@@ -1162,6 +1278,10 @@ LEGENDA ORIGINAL:
             break
 
     print(f"Erro Gemini após tentativas: {ultimo_erro}")
+    try:
+        await mensagem_processamento.delete()
+    except Exception:
+        pass
     await query.edit_message_text(t["rewrite_unavailable"])
 
 
@@ -1199,29 +1319,56 @@ def _montar_painel_ctas():
 
 async def comando_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("Esta função é privada.")
+        await apagar_comando(update)
+        await resposta_temporaria(update, context, "Esta função é privada.")
         return
 
+    await apagar_comando(update)
+    anterior = context.user_data.get("cta_panel_message_id")
+    if anterior:
+        try:
+            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=anterior)
+        except Exception:
+            pass
+
     texto, teclado = _montar_painel_ctas()
-    await update.message.reply_text(
-        texto,
+    mensagem = await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=texto,
         parse_mode="Markdown",
         reply_markup=teclado,
     )
+    context.user_data["cta_panel_message_id"] = mensagem.message_id
 
 
 async def configurar_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("Esta função é privada.")
+        await apagar_comando(update)
+        await resposta_temporaria(update, context, "Esta função é privada.")
         return
+
+    await apagar_comando(update)
+    prompt_anterior = context.user_data.get("cta_prompt_message_id")
+    if prompt_anterior:
+        try:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=prompt_anterior,
+            )
+        except Exception:
+            pass
     context.user_data["configurando_cta"] = "nome"
     context.user_data.pop("cta_nova", None)
-    await update.message.reply_text(
-        "⚙️ **Nova CTA**\n\n"
-        "**1/4** Envia o nome do perfil (ex.: @PapiShow).\n"
-        "Cancelar: /ctacancelar",
+    mensagem = await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=(
+            "⚙️ **Nova CTA**\\n\\n"
+            "**1/4** Envia o nome do perfil (ex.: @PapiShow).\\n"
+            "Cancelar: /ctacancelar"
+        ),
         parse_mode="Markdown",
     )
+    context.user_data["cta_prompt_message_id"] = mensagem.message_id
 
 
 async def receber_config_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1230,9 +1377,18 @@ async def receber_config_cta(update: Update, context: ContextTypes.DEFAULT_TYPE)
     etapa = context.user_data.get("configurando_cta")
     if not etapa:
         return
+
     texto = (update.message.text or "").strip()
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
     if not texto:
-        await update.message.reply_text("O campo não pode ficar vazio. Envie novamente ou use /ctacancelar.")
+        await editar_prompt_cta(
+            context, update.effective_chat.id, context.user_data,
+            "⚠️ O campo não pode ficar vazio. Envia novamente ou usa /ctacancelar.",
+        )
         raise ApplicationHandlerStop
 
     if etapa == "nome":
@@ -1243,10 +1399,10 @@ async def receber_config_cta(update: Update, context: ContextTypes.DEFAULT_TYPE)
             InlineKeyboardButton("🇵🇹 Português", callback_data="cta_idioma:pt"),
             InlineKeyboardButton("🇬🇧 English", callback_data="cta_idioma:en"),
         ]])
-        await update.message.reply_text(
+        await editar_prompt_cta(
+            context, update.effective_chat.id, context.user_data,
             f"**2/4** Idioma da CTA para **@{nome_limpo}**:",
-            parse_mode="Markdown",
-            reply_markup=teclado,
+            parse_mode="Markdown", reply_markup=teclado,
         )
 
     elif etapa == "texto":
@@ -1256,12 +1412,12 @@ async def receber_config_cta(update: Update, context: ContextTypes.DEFAULT_TYPE)
             [InlineKeyboardButton("📌 Fixa", callback_data="cta_modo:fixo")],
             [InlineKeyboardButton("🤝 Contextual", callback_data="cta_modo:contextual")],
         ])
-        await update.message.reply_text(
-            "**4/4** Como aplicar a CTA?\n\n"
-            "📌 **Fixa:** adiciona o texto no final.\n"
+        await editar_prompt_cta(
+            context, update.effective_chat.id, context.user_data,
+            "**4/4** Como aplicar a CTA?\\n\\n"
+            "📌 **Fixa:** adiciona o texto no final.\\n"
             "🤝 **Contextual:** a IA liga a legenda ao perfil.",
-            parse_mode="Markdown",
-            reply_markup=teclado_modo,
+            parse_mode="Markdown", reply_markup=teclado_modo,
         )
 
     raise ApplicationHandlerStop
@@ -1291,6 +1447,7 @@ async def callbacks_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data or ""
 
     if data == "cta_nova_iniciar":
+        context.user_data["cta_prompt_message_id"] = query.message.message_id
         context.user_data["configurando_cta"] = "nome"
         context.user_data.pop("cta_nova", None)
         await query.edit_message_text(
@@ -1382,6 +1539,8 @@ async def callbacks_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["cta_nova"].pop("texto_sugerido", None)
         sucesso, perfil = _salvar_finalizar_cta(context)
         if sucesso:
+            context.user_data.pop("configurando_cta", None)
+            context.user_data.pop("cta_prompt_message_id", None)
             modo_str = "🤝 Conexão Contextual com IA" if modo == "contextual" else "📌 Assinatura Fixa"
             await query.edit_message_text(
                 f"✅ **CTA profissional configurada com sucesso!**\n\n"
@@ -1423,16 +1582,26 @@ async def callbacks_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ Não consegui remover a CTA.")
 
     elif data == "cta_fechar":
+        context.user_data.pop("cta_panel_message_id", None)
         await query.edit_message_text("Painel de CTAs fechado.")
 
 
 async def cancelar_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("Esta função é privada.")
+        await apagar_comando(update)
+        await resposta_temporaria(update, context, "Esta função é privada.")
         return
+
+    await apagar_comando(update)
     context.user_data.pop("configurando_cta", None)
     context.user_data.pop("cta_nova", None)
-    await update.message.reply_text("Configuração de CTA cancelada.")
+    await editar_prompt_cta(
+        context,
+        update.effective_chat.id,
+        context.user_data,
+        "✖️ Configuração de CTA cancelada.",
+    )
+    context.user_data.pop("cta_prompt_message_id", None)
 
 
 async def reagir_falha(update, context):
@@ -1463,7 +1632,7 @@ async def download_video(
     plataforma = identificar_plataforma(url) if url else None
 
     if not url or not plataforma:
-        await update.message.reply_text(t["invalid"])
+        await resposta_temporaria(update, context, t["invalid"])
         return
 
     try:
@@ -1482,7 +1651,7 @@ async def download_video(
         _, inicio = bloqueio
 
         if agora - inicio < 300:
-            await update.message.reply_text(t["busy"])
+            await resposta_temporaria(update, context, t["busy"])
             return
 
         usuarios_ocupados.pop(user_id, None)
@@ -1509,9 +1678,7 @@ async def download_video(
 
             await reagir_falha(update, context)
 
-            await update.message.reply_text(
-                t["unexpected"]
-            )
+            await resposta_temporaria(update, context, t["unexpected"])
 
             usuarios_ocupados.pop(user_id, None)
             return
@@ -1838,6 +2005,15 @@ async def download_video(
         shutil.rmtree(
             pasta_temp,
             ignore_errors=True,
+        )
+
+        context.application.create_task(
+            apagar_mensagem_depois(
+                context.bot,
+                update.effective_chat.id,
+                status_msg.message_id,
+                12,
+            )
         )
 
         bloqueio_atual = usuarios_ocupados.get(user_id)
