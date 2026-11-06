@@ -9,6 +9,7 @@ import re
 import asyncio
 import tempfile
 import shutil
+import subprocess
 from pathlib import Path
 
 from telegram import (
@@ -155,10 +156,10 @@ TEXTOS = {
         "rewrite_private": "Esta função é privada.",
         "rewrite_language": "português",
         "rewrite_language_prompt": "🌍 Em que idioma queres recriar a legenda?",
-        "analyze_video_button": "🔍 Analisar texto do vídeo",
-        "analyzing_video": "🔍 Analisando o que está escrito no vídeo... aguarde.",
-        "video_text_done": "📝 Texto identificado no vídeo:",
-        "video_text_empty": "⚠️ Nenhum texto visível foi encontrado neste vídeo.",
+        "analyze_video_button": "🔍 Extrair legenda do vídeo",
+        "analyzing_video": "🔍 Extraindo a legenda do primeiro frame... aguarde.",
+        "video_text_done": "📝 Legenda identificada:",
+        "video_text_empty": "⚠️ Não foi possível identificar a legenda principal no primeiro frame.",
         "video_not_found": "❌ Não encontrei os dados deste vídeo para analisar.",
         "translate_extracted_button": "🌐 Traduzir texto",
         "rewrite_extracted_button": "✨ Reescrever legenda",
@@ -209,10 +210,10 @@ TEXTOS = {
         "rewrite_private": "This feature is private.",
         "rewrite_language": "English",
         "rewrite_language_prompt": "🌍 Which language should the caption use?",
-        "analyze_video_button": "🔍 Analyze video text",
-        "analyzing_video": "🔍 Analyzing text written in the video... please wait.",
-        "video_text_done": "📝 Text identified in the video:",
-        "video_text_empty": "⚠️ No visible text was found in this video.",
+        "analyze_video_button": "🔍 Extract video caption",
+        "analyzing_video": "🔍 Extracting the caption from the first frame... please wait.",
+        "video_text_done": "📝 Caption identified:",
+        "video_text_empty": "⚠️ The main caption could not be identified in the first frame.",
         "video_not_found": "❌ Video data not found for analysis.",
         "translate_extracted_button": "🌐 Translate text",
         "rewrite_extracted_button": "✨ Rewrite caption",
@@ -594,44 +595,91 @@ def baixar_instagram_instaloader(url, pasta_temp, post=None):
 # =========================================================
 
 def _executar_ocr_video_gemini(caminho_video):
-    """Faz upload temporário do vídeo para a API Gemini, extrai o texto e apaga o arquivo remoto."""
-    arquivo_remoto = gemini_client.files.upload(file=caminho_video)
+    """Extrai o primeiro frame e pede ao Gemini apenas a legenda principal."""
+    pasta_frame = tempfile.mkdtemp(prefix="bot_frame_")
+    caminho_frame = os.path.join(pasta_frame, "primeiro_frame.jpg")
+    arquivo_remoto = None
+
     try:
+        # Extrai somente o primeiro frame. O vídeo não é enviado ao Gemini.
+        resultado = subprocess.run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel", "error",
+                "-y",
+                "-i", caminho_video,
+                "-map", "0:v:0",
+                "-frames:v", "1",
+                "-q:v", "2",
+                caminho_frame,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        if resultado.returncode != 0 or not os.path.isfile(caminho_frame):
+            detalhe = (resultado.stderr or "")[-1000:]
+            raise RuntimeError(
+                f"Não foi possível extrair o primeiro frame com FFmpeg: {detalhe}"
+            )
+
+        # Envia apenas a imagem do primeiro frame para a API Gemini.
+        arquivo_remoto = gemini_client.files.upload(file=caminho_frame)
+
         tentativas_espera = 0
-        while getattr(arquivo_remoto, "state", None) and getattr(arquivo_remoto.state, "name", "") == "PROCESSING":
+        while (
+            getattr(arquivo_remoto, "state", None)
+            and getattr(arquivo_remoto.state, "name", "") == "PROCESSING"
+        ):
             time.sleep(2)
             arquivo_remoto = gemini_client.files.get(name=arquivo_remoto.name)
             tentativas_espera += 1
             if tentativas_espera > 45:
-                raise TimeoutError("Tempo limite excedido ao processar vídeo na IA.")
+                raise TimeoutError("Tempo limite excedido ao processar a imagem na IA.")
 
-        if getattr(arquivo_remoto, "state", None) and getattr(arquivo_remoto.state, "name", "") == "FAILED":
-            raise RuntimeError("Falha no processamento do vídeo pela IA.")
+        if (
+            getattr(arquivo_remoto, "state", None)
+            and getattr(arquivo_remoto.state, "name", "") == "FAILED"
+        ):
+            raise RuntimeError("Falha no processamento da imagem pela IA.")
 
-        prompt_ocr = """Analise visualmente todos os quadros deste vídeo e extraia TODO o texto escrito que aparece na tela (legendas embutidas, títulos, textos sobrepostos, placas ou cartões).
+        prompt_ocr = """Observe esta imagem, que é o PRIMEIRO FRAME de um vídeo.
 
-REGRAS OBRIGATÓRIAS:
-- Transcreva exatamente o que está escrito no vídeo, mantendo o idioma original do texto.
-- Organize o texto na ordem cronológica em que aparece, de forma limpa e legível.
-- Não repita a mesma frase várias vezes se ela apenas permanecer estática na tela por vários segundos.
-- Não invente informações e não descreva o cenário visual (foque exclusivamente no que está escrito).
-- Se não houver absolutamente nenhum texto escrito visível no vídeo, responda apenas: NENHUM_TEXTO_ENCONTRADO
-- Responda apenas com o texto extraído, sem comentários introdutórios ou explicações."""
+Extraia SOMENTE a legenda principal do conteúdo: a frase ou o conjunto de frases que funciona como texto narrativo/subtítulo apresentado ao espectador.
+
+IGNORE completamente:
+- nomes de utilizadores, @perfis e nomes de páginas;
+- marcas de água, logótipos e assinaturas de criadores;
+- ícones, botões, contadores e elementos da interface da plataforma;
+- textos de menus, comentários, descrições do perfil ou informações da publicação;
+- placas, embalagens, cartazes e qualquer outro texto que não seja a legenda principal do vídeo.
+
+REGRAS:
+- Copie a legenda principal exactamente como aparece, mantendo o idioma, a pontuação e as quebras de linha relevantes.
+- Se houver vários textos, escolha apenas aquele que claramente funciona como legenda/subtítulo principal do vídeo.
+- Não invente palavras nem complete partes que não estejam visíveis.
+- Se a legenda principal não estiver visível ou não for possível distingui-la, responda apenas: NENHUMA_LEGENDA_ENCONTRADA
+- Responda apenas com a legenda extraída, sem introduções ou explicações."""
 
         resposta = gemini_client.models.generate_content(
             model="gemini-3.1-flash-lite",
             contents=[arquivo_remoto, prompt_ocr],
         )
         return (resposta.text or "").strip()
+
     finally:
-        try:
-            gemini_client.files.delete(name=arquivo_remoto.name)
-        except Exception as e:
-            print(f"Aviso ao limpar arquivo remoto Gemini: {e}")
+        if arquivo_remoto is not None:
+            try:
+                gemini_client.files.delete(name=arquivo_remoto.name)
+            except Exception as e:
+                print(f"Aviso ao limpar imagem remota Gemini: {e}")
+        shutil.rmtree(pasta_frame, ignore_errors=True)
 
 
 async def analisar_texto_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Baixa o vídeo temporariamente e usa o Gemini para ler tudo o que está escrito nele."""
+    """Baixa o vídeo, extrai o primeiro frame e analisa apenas a legenda principal."""
     query = update.callback_query
     user_id = update.effective_user.id
     idioma = obter_idioma(user_id)
@@ -717,7 +765,7 @@ async def analisar_texto_video(update: Update, context: ContextTypes.DEFAULT_TYP
         if texto_extraido is None:
             raise RuntimeError(f"Falha Gemini OCR: {ultimo_erro}")
 
-        if not texto_extraido or "NENHUM_TEXTO_ENCONTRADO" in texto_extraido:
+        if not texto_extraido or any(marcador in texto_extraido for marcador in ("NENHUMA_LEGENDA_ENCONTRADA", "NENHUM_TEXTO_ENCONTRADO")):
             await msg_status.edit_text(t["video_text_empty"])
             return
 
