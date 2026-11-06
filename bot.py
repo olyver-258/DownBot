@@ -67,7 +67,7 @@ legendas_para_recriar = {}
 videos_para_analisar = {}
 
 # CTAs por perfil, guardadas separadamente para sobreviver a reinícios.
-CTA_CONFIG_PATH = Path(__file__).with_name("ctas.json")
+CTA_CONFIG_PATH = Path(os.getenv("CTA_CONFIG_PATH", str(Path(__file__).with_name("ctas.json"))))
 
 CATEGORIAS_CTA = {
     "crescimento": {
@@ -103,6 +103,7 @@ def carregar_ctas():
 
 
 def guardar_ctas():
+    CTA_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(CTA_CONFIG_PATH, "w", encoding="utf-8") as arquivo:
         json.dump(ctas_perfis, arquivo, ensure_ascii=False, indent=2)
 
@@ -161,11 +162,11 @@ TEXTOS = {
         "video_text_done": "📝 Legenda identificada:",
         "video_text_empty": "⚠️ Não foi possível identificar a legenda principal no primeiro frame.",
         "video_not_found": "❌ Não encontrei os dados deste vídeo para analisar.",
-        "translate_extracted_button": "🌐 Traduzir texto",
-        "rewrite_extracted_button": "✨ Reescrever legenda",
-        "translate_prompt": "🌍 Para qual idioma queres traduzir o texto extraído?",
-        "translating_text": "🌐 Traduzindo texto extraído...",
-        "translated_done": "🌐 Texto traduzido:",
+        "translate_extracted_button": "TRADUZIR",
+        "rewrite_extracted_button": "REESCREVER",
+        "translate_prompt": "🌍 Escolhe o idioma:",
+        "translating_text": "A traduzir...",
+        "translated_done": "🌐 Tradução:",
         "language": "🌍 Escolha o seu idioma:",
     },
 
@@ -215,11 +216,11 @@ TEXTOS = {
         "video_text_done": "📝 Caption identified:",
         "video_text_empty": "⚠️ The main caption could not be identified in the first frame.",
         "video_not_found": "❌ Video data not found for analysis.",
-        "translate_extracted_button": "🌐 Translate text",
-        "rewrite_extracted_button": "✨ Rewrite caption",
-        "translate_prompt": "🌍 Which language do you want to translate the text into?",
-        "translating_text": "🌐 Translating extracted text...",
-        "translated_done": "🌐 Translated text:",
+        "translate_extracted_button": "TRANSLATE",
+        "rewrite_extracted_button": "REWRITE",
+        "translate_prompt": "🌍 Choose a language:",
+        "translating_text": "Translating...",
+        "translated_done": "🌐 Translation:",
         "language": "🌍 Choose your language:",
     },
 }
@@ -843,7 +844,7 @@ async def iniciar_traducao_extraido(update: Update, context: ContextTypes.DEFAUL
 
 
 async def executar_traducao_extraido(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Traduz o texto extraído do vídeo e oferece o botão de Reescrever como legenda."""
+    """Traduz o texto extraído sem apagar a legenda original."""
     query = update.callback_query
     user_id = update.effective_user.id
     idioma_usuario = obter_idioma(user_id)
@@ -857,7 +858,7 @@ async def executar_traducao_extraido(update: Update, context: ContextTypes.DEFAU
 
     partes = (query.data or "").split(":")
     if len(partes) != 3 or partes[1] not in ("pt", "en"):
-        await query.edit_message_text("❌ Idioma inválido.")
+        await query.answer("Idioma inválido.", show_alert=True)
         return
 
     idioma_destino = {"pt": "português", "en": "English"}[partes[1]]
@@ -865,17 +866,28 @@ async def executar_traducao_extraido(update: Update, context: ContextTypes.DEFAU
     dados_legenda = legendas_para_recriar.get(legenda_id)
 
     if not dados_legenda or not dados_legenda.get("legenda"):
-        await query.edit_message_text(t["rewrite_not_found"])
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=t["rewrite_not_found"],
+            reply_parameters=ReplyParameters(message_id=query.message.message_id),
+        )
         return
 
     if not gemini_client:
-        await query.edit_message_text(t["rewrite_unavailable"])
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=t["rewrite_unavailable"],
+            reply_parameters=ReplyParameters(message_id=query.message.message_id),
+        )
         return
-
-    await query.edit_message_text(t["translating_text"])
 
     texto_original = dados_legenda["legenda"]
     video_message_id = dados_legenda["video_message_id"]
+    status_msg = await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=t["translating_text"],
+        reply_parameters=ReplyParameters(message_id=query.message.message_id),
+    )
 
     prompt = f"""Traduza fielmente o texto abaixo para {idioma_destino}.
 
@@ -899,29 +911,32 @@ TEXTO PARA TRADUZIR:
         if not texto_traduzido:
             raise ValueError("Resposta vazia na tradução.")
 
-        # Guarda também a versão traduzida caso o admin queira reescrevê-la como legenda
         novo_id = str(uuid.uuid4())[:8]
         legendas_para_recriar[novo_id] = {
             "legenda": texto_traduzido,
             "video_message_id": video_message_id,
         }
 
-        teclado_reescrever = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton(
-                    t["rewrite_extracted_button"],
-                    callback_data=f"recriar_legenda:{novo_id}",
-                )
-            ]
-        ])
+        teclado_reescrever = InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                t["rewrite_extracted_button"],
+                callback_data=f"recriar_legenda:{novo_id}",
+            )
+        ]])
 
-        await query.edit_message_text(
-            f"{t['translated_done']}\n\n{texto_traduzido}",
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=f"{t['translated_done']}\n\n{texto_traduzido}",
             reply_markup=teclado_reescrever,
+            reply_parameters=ReplyParameters(message_id=query.message.message_id),
         )
+        await status_msg.delete()
     except Exception as e:
         print(f"Erro ao traduzir texto extraído: {e}")
-        await query.edit_message_text(t["rewrite_unavailable"])
+        try:
+            await status_msg.edit_text(t["rewrite_unavailable"])
+        except Exception:
+            pass
 
 
 # =========================================================
@@ -948,7 +963,11 @@ async def recriar_legenda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     dados_legenda = legendas_para_recriar.get(legenda_id) if legenda_id else None
     if not dados_legenda or not dados_legenda.get("legenda"):
         idioma = obter_idioma(user_id)
-        await query.edit_message_text(TEXTOS[idioma]["rewrite_not_found"])
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=TEXTOS[idioma]["rewrite_not_found"],
+            reply_parameters=ReplyParameters(message_id=query.message.message_id),
+        )
         return
 
     teclado_idioma_legenda = InlineKeyboardMarkup([
@@ -962,22 +981,13 @@ async def recriar_legenda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "rewrite_language_prompt", "🌍 Em que idioma queres recriar a legenda?"
     )
 
-    # Se a mensagem original tiver outros botões importantes (como texto extraído do vídeo),
-    # envia um novo seletor em resposta para não apagar o texto extraído.
-    if query.message and query.message.text and (
-        query.message.text.startswith("📝") or query.message.text.startswith("🌐")
-    ):
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=texto_prompt,
-            reply_markup=teclado_idioma_legenda,
-            reply_parameters=ReplyParameters(message_id=query.message.message_id),
-        )
-    else:
-        await query.edit_message_text(
-            texto_prompt,
-            reply_markup=teclado_idioma_legenda,
-        )
+    # O seletor é sempre uma nova mensagem. A legenda original fica intacta.
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=texto_prompt,
+        reply_markup=teclado_idioma_legenda,
+        reply_parameters=ReplyParameters(message_id=query.message.message_id),
+    )
 
 
 async def gerar_legenda_recriada(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1015,8 +1025,9 @@ async def gerar_legenda_recriada(update: Update, context: ContextTypes.DEFAULT_T
             idioma_cta = str(perfil.get("idioma", "pt")).upper()
             bandeira = "🇵🇹" if idioma_cta == "PT" else "🇬🇧"
             modo_icone = "🤝" if perfil.get("modo") == "contextual" else "📌"
+            modo_curto = "Contextual" if perfil.get("modo") == "contextual" else "Fixa"
             botoes.append([InlineKeyboardButton(
-                f"{bandeira} {nome} ({modo_icone} {idioma_cta})",
+                f"{bandeira} {nome} · {modo_curto}",
                 callback_data=f"recriar_perfil:{idioma_codigo}:{legenda_id}:{perfil_id}",
             )])
 
@@ -1025,8 +1036,7 @@ async def gerar_legenda_recriada(update: Update, context: ContextTypes.DEFAULT_T
             callback_data=f"recriar_perfil:{idioma_codigo}:{legenda_id}:sem_cta",
         )])
         await query.edit_message_text(
-            "👤 **Selecione o Perfil / CTA para aplicar na legenda:**\n"
-            "_(📌 = Assinatura Fixa | 🤝 = Conexão Contextual com IA)_",
+            "👤 **Escolhe a CTA:**",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(botoes),
         )
@@ -1063,7 +1073,11 @@ async def gerar_legenda_recriada(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text(t["rewrite_unavailable"])
         return
 
-    await query.edit_message_text(t["rewrite_processing"])
+    mensagem_processamento = await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=t["rewrite_processing"],
+        reply_parameters=ReplyParameters(message_id=video_message_id),
+    )
 
     instrucao_transicao = (
         "- Não inclua nenhum CTA na resposta recriada. O bot acrescentará separadamente o CTA do perfil escolhido, se existir."
@@ -1131,7 +1145,7 @@ LEGENDA ORIGINAL:
             )
 
             try:
-                await query.message.delete()
+                await mensagem_processamento.delete()
             except Exception as e:
                 print(f"Erro ao apagar mensagem de processamento: {e}")
             return
@@ -1156,46 +1170,31 @@ LEGENDA ORIGINAL:
 # =========================================================
 
 def _montar_painel_ctas():
-    """Retorna o texto formatado e o InlineKeyboardMarkup do painel principal de CTAs."""
+    """Painel compacto de perfis e respetivos modos de CTA."""
     if not ctas_perfis:
-        texto = (
-            "📋 **Painel de CTAs Profissionais**\n\n"
-            "Ainda não há perfis configurados.\n"
-            "Clique no botão abaixo ou use /config_cta para cadastrar sua primeira CTA."
-        )
+        texto = "📋 **CTAs**\n\nAinda não há perfis. Cria a primeira CTA abaixo."
         teclado = InlineKeyboardMarkup([
-            [InlineKeyboardButton("➕ Criar Nova CTA", callback_data="cta_nova_iniciar")],
-            [InlineKeyboardButton("✖️ Fechar", callback_data="cta_fechar")],
+            [InlineKeyboardButton("➕ Nova CTA", callback_data="cta_nova_iniciar")],
+            [InlineKeyboardButton("Fechar", callback_data="cta_fechar")],
         ])
         return texto, teclado
 
-    linhas = ["📋 **Painel de CTAs por Perfil**\n"]
+    linhas = ["📋 **CTAs configuradas**"]
     botoes = []
-
     for perfil_id, perfil in ctas_perfis.items():
         nome = str(perfil.get("nome", "Perfil"))
         idioma = str(perfil.get("idioma", "pt")).upper()
         bandeira = "🇵🇹" if idioma == "PT" else "🇬🇧"
-        cat_key = perfil.get("categoria", "personalizada")
-        cat_label = CATEGORIAS_CTA.get(cat_key, CATEGORIAS_CTA["personalizada"])["label"]
-        modo_label = "🤝 IA Contextual" if perfil.get("modo") == "contextual" else "📌 Fixa"
-        texto_cta = str(perfil.get("texto", ""))
-
-        linhas.append(
-            f"👤 **{nome}** ({bandeira} {idioma})\n"
-            f"├ Categoria: {cat_label}\n"
-            f"├ Inserção: {modo_label}\n"
-            f"└ `{texto_cta}`"
-        )
+        modo = "🤝 Contextual" if perfil.get("modo") == "contextual" else "📌 Fixa"
+        linhas.append(f"• **{nome}** · {bandeira} {idioma} · {modo}")
         botoes.append([
-            InlineKeyboardButton(f"🔄 Modo ({nome[:14]})", callback_data=f"cta_alternar_modo:{perfil_id}"),
-            InlineKeyboardButton(f"🗑 Excluir {nome[:14]}", callback_data=f"cta_remover:{perfil_id}"),
+            InlineKeyboardButton(f"🔄 Modo · {nome[:12]}", callback_data=f"cta_alternar_modo:{perfil_id}"),
+            InlineKeyboardButton(f"🗑 Remover · {nome[:12]}", callback_data=f"cta_remover:{perfil_id}"),
         ])
 
-    botoes.append([InlineKeyboardButton("➕ Criar Nova CTA", callback_data="cta_nova_iniciar")])
-    botoes.append([InlineKeyboardButton("✖️ Fechar", callback_data="cta_fechar")])
-
-    return "\n\n".join(linhas), InlineKeyboardMarkup(botoes)
+    botoes.append([InlineKeyboardButton("➕ Nova CTA", callback_data="cta_nova_iniciar")])
+    botoes.append([InlineKeyboardButton("Fechar", callback_data="cta_fechar")])
+    return "\n".join(linhas), InlineKeyboardMarkup(botoes)
 
 
 async def comando_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1218,9 +1217,9 @@ async def configurar_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["configurando_cta"] = "nome"
     context.user_data.pop("cta_nova", None)
     await update.message.reply_text(
-        "⚙️ **Configuração Profissional de CTA**\n\n"
-        "**Passo 1/4** — Envie o nome ou @ do perfil (ex.: `Six7Live`).\n\n"
-        "Use /ctacancelar a qualquer momento para sair.",
+        "⚙️ **Nova CTA**\n\n"
+        "**1/4** Envia o nome do perfil (ex.: @PapiShow).\n"
+        "Cancelar: /ctacancelar",
         parse_mode="Markdown",
     )
 
@@ -1245,7 +1244,7 @@ async def receber_config_cta(update: Update, context: ContextTypes.DEFAULT_TYPE)
             InlineKeyboardButton("🇬🇧 English", callback_data="cta_idioma:en"),
         ]])
         await update.message.reply_text(
-            f"**Passo 2/4** — Escolha o idioma padrão da CTA para **@{nome_limpo}**:",
+            f"**2/4** Idioma da CTA para **@{nome_limpo}**:",
             parse_mode="Markdown",
             reply_markup=teclado,
         )
@@ -1254,13 +1253,13 @@ async def receber_config_cta(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data["cta_nova"]["texto"] = texto
         context.user_data["configurando_cta"] = "modo"
         teclado_modo = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📌 Assinatura Fixa (Padrão)", callback_data="cta_modo:fixo")],
-            [InlineKeyboardButton("🤝 Conexão Contextual com IA", callback_data="cta_modo:contextual")],
+            [InlineKeyboardButton("📌 Fixa", callback_data="cta_modo:fixo")],
+            [InlineKeyboardButton("🤝 Contextual", callback_data="cta_modo:contextual")],
         ])
         await update.message.reply_text(
-            "**Passo 4/4** — Como deseja anexar essa CTA às legendas recriadas?\n\n"
-            "• **📌 Assinatura Fixa**: Anexa exatamente a sua CTA no final da legenda.\n"
-            "• **🤝 Conexão Contextual**: A IA cria uma frase conectando o assunto do vídeo ao seu perfil antes de inserir a CTA.",
+            "**4/4** Como aplicar a CTA?\n\n"
+            "📌 **Fixa:** adiciona o texto no final.\n"
+            "🤝 **Contextual:** a IA liga a legenda ao perfil.",
             parse_mode="Markdown",
             reply_markup=teclado_modo,
         )
@@ -1295,9 +1294,9 @@ async def callbacks_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["configurando_cta"] = "nome"
         context.user_data.pop("cta_nova", None)
         await query.edit_message_text(
-            "⚙️ **Configuração Profissional de CTA**\n\n"
-            "**Passo 1/4** — Envie o nome ou @ do perfil (ex.: `Six7Live`).\n\n"
-            "Use /ctacancelar para cancelar.",
+            "⚙️ **Nova CTA**\n\n"
+            "**1/4** Envia o nome do perfil (ex.: @PapiShow).\n"
+            "Cancelar: /ctacancelar",
             parse_mode="Markdown",
         )
 
@@ -1309,13 +1308,13 @@ async def callbacks_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["cta_nova"]["idioma"] = idioma
         context.user_data["configurando_cta"] = "categoria"
         teclado_cat = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📈 Crescimento (Seguir Perfil)", callback_data="cta_cat:crescimento")],
-            [InlineKeyboardButton("💬 Engajamento (Comentários)", callback_data="cta_cat:engajamento")],
-            [InlineKeyboardButton("🔗 Conversão (Link na Bio)", callback_data="cta_cat:conversao")],
-            [InlineKeyboardButton("✍️ Personalizada (Digitar do zero)", callback_data="cta_cat:personalizada")],
+            [InlineKeyboardButton("📈 Seguidores", callback_data="cta_cat:crescimento")],
+            [InlineKeyboardButton("💬 Comentários", callback_data="cta_cat:engajamento")],
+            [InlineKeyboardButton("🔗 Link na bio", callback_data="cta_cat:conversao")],
+            [InlineKeyboardButton("✍️ Personalizada", callback_data="cta_cat:personalizada")],
         ])
         await query.edit_message_text(
-            "**Passo 3/4** — Qual é o objetivo principal desta CTA?",
+            "**3/4** Objetivo da CTA:",
             parse_mode="Markdown",
             reply_markup=teclado_cat,
         )
@@ -1333,8 +1332,8 @@ async def callbacks_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if cat == "personalizada":
             context.user_data["configurando_cta"] = "texto"
             await query.edit_message_text(
-                f"✍️ Envie agora o texto completo da CTA para **@{nome_perfil}**.\n\n"
-                "Use /ctacancelar para cancelar.",
+                f"✍️ Envia o texto da CTA para **@{nome_perfil}**.\n"
+                "Cancelar: /ctacancelar",
                 parse_mode="Markdown",
             )
             return
@@ -1345,12 +1344,12 @@ async def callbacks_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["configurando_cta"] = "texto"
 
         teclado_sugestao = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Usar este modelo pronto", callback_data="cta_usar_sugestao")],
+            [InlineKeyboardButton("✅ Usar modelo", callback_data="cta_usar_sugestao")],
         ])
         await query.edit_message_text(
-            f"💡 **Modelo sugerido para @{nome_perfil}:**\n"
+            f"💡 **Sugestão para @{nome_perfil}:**\n"
             f"`{sugestao}`\n\n"
-            "Clique no botão abaixo para usar este modelo **ou digite e envie o seu próprio texto** agora:",
+            "Usa o modelo ou envia outro texto.",
             parse_mode="Markdown",
             reply_markup=teclado_sugestao,
         )
@@ -1363,13 +1362,13 @@ async def callbacks_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["cta_nova"]["texto"] = sugestao
         context.user_data["configurando_cta"] = "modo"
         teclado_modo = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📌 Assinatura Fixa (Padrão)", callback_data="cta_modo:fixo")],
-            [InlineKeyboardButton("🤝 Conexão Contextual com IA", callback_data="cta_modo:contextual")],
+            [InlineKeyboardButton("📌 Fixa", callback_data="cta_modo:fixo")],
+            [InlineKeyboardButton("🤝 Contextual", callback_data="cta_modo:contextual")],
         ])
         await query.edit_message_text(
-            "**Passo 4/4** — Como deseja anexar essa CTA às legendas recriadas?\n\n"
-            "• **📌 Assinatura Fixa**: Anexa exatamente a sua CTA no final da legenda.\n"
-            "• **🤝 Conexão Contextual**: A IA cria uma frase conectando o assunto do vídeo ao seu perfil antes de inserir a CTA.",
+            "**4/4** Como aplicar a CTA?\n\n"
+            "📌 **Fixa:** adiciona o texto no final.\n"
+            "🤝 **Contextual:** a IA liga a legenda ao perfil.",
             parse_mode="Markdown",
             reply_markup=teclado_modo,
         )
