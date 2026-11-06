@@ -151,7 +151,7 @@ TEXTOS = {
         ),
         "rewrite_button": "✨ Recriar legenda",
         "rewrite_processing": "✨ Recriando legenda...",
-        "rewrite_done": "✨ Legenda recriada:",
+        "rewrite_done": "✨ Legenda do vídeo recriada:",
         "rewrite_not_found": "❌ Não encontrei uma legenda para recriar.",
         "rewrite_unavailable": "❌ A IA está temporariamente indisponível. Tente novamente daqui a pouco.",
         "rewrite_private": "Esta função é privada.",
@@ -166,7 +166,7 @@ TEXTOS = {
         "rewrite_extracted_button": "REESCREVER",
         "translate_prompt": "🌍 Escolhe o idioma:",
         "translating_text": "A traduzir...",
-        "translated_done": "🌐 Tradução:",
+        "translated_done": "🌐 Legenda do vídeo traduzida:",
         "language": "🌍 Escolha o seu idioma:",
     },
 
@@ -205,7 +205,7 @@ TEXTOS = {
         ),
         "rewrite_button": "✨ Rewrite caption",
         "rewrite_processing": "✨ Rewriting caption...",
-        "rewrite_done": "✨ Caption rewritten:",
+        "rewrite_done": "✨ Video caption rewritten:",
         "rewrite_not_found": "❌ I couldn't find a caption to rewrite.",
         "rewrite_unavailable": "❌ AI is temporarily unavailable. Please try again later.",
         "rewrite_private": "This feature is private.",
@@ -220,7 +220,7 @@ TEXTOS = {
         "rewrite_extracted_button": "REWRITE",
         "translate_prompt": "🌍 Choose a language:",
         "translating_text": "Translating...",
-        "translated_done": "🌐 Translation:",
+        "translated_done": "🌐 Video caption translated:",
         "language": "🌍 Choose your language:",
     },
 }
@@ -518,14 +518,17 @@ def identificar_plataforma(url):
 
 def baixar_video(url, pasta_temp):
     ydl_options = {
-        "format": "best",
+        # Prefere um ficheiro único abaixo do limite do Telegram; evita
+        # downloads separados de áudio/vídeo e a necessidade de remux sempre que possível.
+        "format": "best[filesize<49M]/best[height<=1080]/best",
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "socket_timeout": 60,
-        "retries": 3,
-        "fragment_retries": 3,
-        "extractor_retries": 3,
+        "socket_timeout": 35,
+        "retries": 2,
+        "fragment_retries": 2,
+        "extractor_retries": 2,
+        "concurrent_fragment_downloads": 4,
         "restrictfilenames": True,
         "http_headers": {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -691,21 +694,20 @@ def baixar_instagram_instaloader(url, pasta_temp, post=None):
         })
 
     import urllib.request
+    from concurrent.futures import ThreadPoolExecutor
 
-    for item in itens:
+    def descarregar_item(item):
         request = urllib.request.Request(
-            item["url"],
-            headers={
-                "User-Agent": "Mozilla/5.0",
-            },
+            item["url"], headers={"User-Agent": "Mozilla/5.0"}
         )
-
-        with urllib.request.urlopen(
-            request,
-            timeout=60,
-        ) as resposta:
+        with urllib.request.urlopen(request, timeout=35) as resposta:
             with open(item["caminho"], "wb") as arquivo:
                 shutil.copyfileobj(resposta, arquivo)
+
+    # Carrosséis são descarregados em paralelo, limitando a concorrência
+    # para não sobrecarregar a ligação nem o servidor do Instagram.
+    with ThreadPoolExecutor(max_workers=min(4, max(1, len(itens)))) as executor:
+        list(executor.map(descarregar_item, itens))
 
     return {
         "tipo": (
@@ -716,6 +718,19 @@ def baixar_instagram_instaloader(url, pasta_temp, post=None):
         "arquivos": itens,
         "legenda": legenda,
     }
+
+
+def limpar_texto_ia(texto):
+    """Remove delimitadores e converte quebras de linha escapadas em linhas reais."""
+    texto = str(texto or "").strip()
+    texto = texto.replace("\\\\r\\\\n", "\n").replace("\\\\n", "\n")
+    texto = texto.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
+    texto = re.sub(r"(?im)^\s*---\s*(?:IN[IÍ]CIO|FIM)(?: DA LEGENDA| DA RESPOSTA| DO TEXTO)?\s*---\s*$", "", texto)
+    texto = re.sub(r"(?im)^\s*---\s*(?:IN[IÍ]CIO|FIM)\s*---\s*$", "", texto)
+    texto = re.sub(r"(?im)^\s*(?:🌐\s*)?(?:Tradução|Translation)\s*:\s*", "", texto)
+    texto = re.sub(r"(?im)^\s*(?:✨\s*)?(?:Legenda recriada|Caption rewritten)\s*:\s*", "", texto)
+    texto = re.sub(r"^```[\w-]*\s*|\s*```$", "", texto)
+    return texto.strip()
 
 
 # =========================================================
@@ -900,6 +915,7 @@ async def analisar_texto_video(update: Update, context: ContextTypes.DEFAULT_TYP
         legendas_para_recriar[legenda_id] = {
             "legenda": texto_extraido,
             "video_message_id": dados_video["video_message_id"],
+            "caption_message_id": msg_status.message_id,
         }
 
         teclado_pos_ocr = InlineKeyboardMarkup([
@@ -964,12 +980,13 @@ async def iniciar_traducao_extraido(update: Update, context: ContextTypes.DEFAUL
         ]
     ])
 
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=t["translate_prompt"],
-        reply_markup=teclado,
-        reply_parameters=ReplyParameters(message_id=query.message.message_id),
-    )
+    try:
+        await query.edit_message_text(
+            t["translate_prompt"],
+            reply_markup=teclado,
+        )
+    except Exception as e:
+        print(f"Não foi possível actualizar o menu de tradução: {e}")
 
 
 async def executar_traducao_extraido(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1012,7 +1029,9 @@ async def executar_traducao_extraido(update: Update, context: ContextTypes.DEFAU
 REGRAS:
 - Mantenha o sentido original, o tom e a formatação em linhas.
 - Adapte expressões idiomáticas de forma natural para {idioma_destino}.
-- Não adicione explicações nem notas. Responda apenas com a tradução.
+- Não adicione títulos, rótulos, explicações, notas ou delimitadores.
+- Não escreva “INÍCIO”, “FIM”, “Tradução” ou qualquer texto antes/depois.
+- Responda apenas com a tradução, preservando as quebras de linha.
 
 TEXTO PARA TRADUZIR:
 --- INÍCIO ---
@@ -1025,7 +1044,7 @@ TEXTO PARA TRADUZIR:
             model="gemini-3.1-flash-lite",
             contents=prompt,
         )
-        texto_traduzido = (resposta.text or "").strip()
+        texto_traduzido = limpar_texto_ia(resposta.text)
         if not texto_traduzido:
             raise ValueError("Resposta vazia na tradução.")
 
@@ -1033,6 +1052,7 @@ TEXTO PARA TRADUZIR:
         legendas_para_recriar[novo_id] = {
             "legenda": texto_traduzido,
             "video_message_id": video_message_id,
+            "caption_message_id": dados_legenda.get("caption_message_id") or query.message.message_id,
         }
 
         teclado_reescrever = InlineKeyboardMarkup([[
@@ -1043,7 +1063,7 @@ TEXTO PARA TRADUZIR:
         ]])
 
         await query.edit_message_text(
-            f"{t['translated_done']}\\n\\n{texto_traduzido}",
+            f"{t['translated_done']}\n\n{texto_traduzido}",
             reply_markup=teclado_reescrever,
         )
     except Exception as e:
@@ -1097,12 +1117,11 @@ async def recriar_legenda(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "rewrite_language_prompt", "🌍 Em que idioma queres recriar a legenda?"
     )
 
-    # O seletor é sempre uma nova mensagem. A legenda original fica intacta.
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=texto_prompt,
+    # Substitui o menu da legenda pela escolha do idioma, sem criar outra mensagem.
+    dados_legenda["caption_message_id"] = query.message.message_id
+    await query.edit_message_text(
+        texto_prompt,
         reply_markup=teclado_idioma_legenda,
-        reply_parameters=ReplyParameters(message_id=query.message.message_id),
     )
 
 
@@ -1242,28 +1261,34 @@ LEGENDA ORIGINAL:
                 model="gemini-3.1-flash-lite",
                 contents=prompt,
             )
-            nova_legenda = resposta.text
+            nova_legenda = limpar_texto_ia(resposta.text)
             if not nova_legenda:
                 raise ValueError("Gemini retornou uma resposta vazia.")
 
             if cta_escolhida:
                 nova_legenda = f"{nova_legenda.rstrip()}\n\n{cta_escolhida}"
 
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=nova_legenda,
-                reply_parameters=ReplyParameters(message_id=video_message_id),
-            )
+            mensagem_legenda_id = dados_legenda.get("caption_message_id")
+            texto_final = f"{t['rewrite_done']}\n\n{nova_legenda}"
+            if mensagem_legenda_id:
+                await context.bot.edit_message_text(
+                    chat_id=update.effective_chat.id,
+                    message_id=mensagem_legenda_id,
+                    text=texto_final,
+                )
+                if query.message.message_id != mensagem_legenda_id:
+                    try:
+                        await query.message.delete()
+                    except Exception:
+                        pass
+            else:
+                await query.edit_message_text(texto_final)
 
             try:
                 await mensagem_processamento.delete()
             except Exception as e:
                 print(f"Erro ao apagar mensagem de processamento: {e}")
 
-            try:
-                await query.edit_message_text(t["rewrite_done"])
-            except Exception:
-                pass
             return
 
         except Exception as e:
@@ -1362,8 +1387,8 @@ async def configurar_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensagem = await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=(
-            "⚙️ **Nova CTA**\\n\\n"
-            "**1/4** Envia o nome do perfil (ex.: @PapiShow).\\n"
+            "⚙️ **Nova CTA**\n\n"
+            "**1/4** Envia o nome do perfil (ex.: @PapiShow).\n"
             "Cancelar: /ctacancelar"
         ),
         parse_mode="Markdown",
@@ -1414,8 +1439,8 @@ async def receber_config_cta(update: Update, context: ContextTypes.DEFAULT_TYPE)
         ])
         await editar_prompt_cta(
             context, update.effective_chat.id, context.user_data,
-            "**4/4** Como aplicar a CTA?\\n\\n"
-            "📌 **Fixa:** adiciona o texto no final.\\n"
+            "**4/4** Como aplicar a CTA?\n\n"
+            "📌 **Fixa:** adiciona o texto no final.\n"
             "🤝 **Contextual:** a IA liga a legenda ao perfil.",
             parse_mode="Markdown", reply_markup=teclado_modo,
         )
@@ -1912,6 +1937,7 @@ async def download_video(
                 legendas_para_recriar[legenda_id] = {
                     "legenda": legenda,
                     "video_message_id": mensagem_video.message_id,
+                    "caption_message_id": None,
                 }
                 botoes_admin.append([
                     InlineKeyboardButton(
@@ -1935,10 +1961,12 @@ async def download_video(
                 ])
 
             if legenda:
-                await update.message.reply_text(
+                mensagem_legenda = await update.message.reply_text(
                     legenda,
                     reply_markup=InlineKeyboardMarkup(botoes_admin) if botoes_admin else None,
                 )
+                if update.effective_user.id == ADMIN_ID and 'legenda_id' in locals():
+                    legendas_para_recriar[legenda_id]["caption_message_id"] = mensagem_legenda.message_id
             elif botoes_admin:
                 # Caso o vídeo não tenha legenda original na plataforma, envia o botão de analisar texto do vídeo
                 await context.bot.send_message(
