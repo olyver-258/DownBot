@@ -1064,8 +1064,13 @@ TEXTO PARA TRADUZIR:
         ]])
 
         await query.edit_message_text(
-            f"{t['translated_done']}\n\n{texto_traduzido}",
+            texto_traduzido,
             reply_markup=teclado_reescrever,
+        )
+        await reagir_sucesso(
+            context,
+            update.effective_chat.id,
+            video_message_id,
         )
     except Exception as e:
         print(f"Erro ao traduzir texto extraído: {e}")
@@ -1270,7 +1275,7 @@ LEGENDA ORIGINAL:
                 nova_legenda = f"{nova_legenda.rstrip()}\n\n{cta_escolhida}"
 
             mensagem_legenda_id = dados_legenda.get("caption_message_id")
-            texto_final = f"{t['rewrite_done']}\n\n{nova_legenda}"
+            texto_final = nova_legenda
             if mensagem_legenda_id:
                 await context.bot.edit_message_text(
                     chat_id=update.effective_chat.id,
@@ -1289,6 +1294,12 @@ LEGENDA ORIGINAL:
                 await mensagem_processamento.delete()
             except Exception as e:
                 print(f"Erro ao apagar mensagem de processamento: {e}")
+
+            await reagir_sucesso(
+                context,
+                update.effective_chat.id,
+                video_message_id,
+            )
 
             return
 
@@ -1657,6 +1668,18 @@ async def reagir_falha(update, context):
         )
     except Exception as e:
         print(f"Não foi possível adicionar reação de falha: {e}")
+
+
+async def reagir_sucesso(context, chat_id, message_id):
+    """Adiciona 👍 à mensagem original quando a legenda é processada."""
+    try:
+        await context.bot.set_message_reaction(
+            chat_id=chat_id,
+            message_id=message_id,
+            reaction=[ReactionTypeEmoji(emoji="👍")],
+        )
+    except Exception as e:
+        print(f"Não foi possível adicionar reação de sucesso: {e}")
 
 
 # =========================================================
