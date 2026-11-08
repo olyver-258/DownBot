@@ -8,6 +8,7 @@ load_dotenv()
 import re
 import asyncio
 import tempfile
+import mimetypes
 import shutil
 import subprocess
 import sys
@@ -174,6 +175,7 @@ def comandos_publicos():
 
 def comandos_premium():
     return comandos_publicos() + [
+        BotCommand("extrair", "🔍 Extrair texto de uma imagem"),
         BotCommand("cta", "📣 Gerir minhas CTAs"),
         BotCommand("config_cta", "⚙️ Criar uma CTA"),
     ]
@@ -830,6 +832,125 @@ REGRAS:
             except Exception as e:
                 print(f"Aviso ao limpar imagem remota Gemini: {e}")
         shutil.rmtree(pasta_frame, ignore_errors=True)
+
+
+async def comando_extrair_imagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Extrai texto de uma imagem enviada anteriormente e respondida com /extrair."""
+    user_id = update.effective_user.id
+    idioma = obter_idioma(user_id)
+    t = TEXTOS[idioma]
+    mensagem = update.effective_message
+
+    if not eh_admin(user_id):
+        await mensagem.reply_text(t["rewrite_private"])
+        return
+
+    imagem_msg = mensagem.reply_to_message
+    if not imagem_msg:
+        await mensagem.reply_text(
+            "⚠️ Envia a imagem ao bot e responde à imagem com /extrair."
+        )
+        return
+
+    arquivo_tg = None
+    if imagem_msg.photo:
+        arquivo_tg = await context.bot.get_file(imagem_msg.photo[-1].file_id)
+    elif imagem_msg.document and (imagem_msg.document.mime_type or "").startswith("image/"):
+        arquivo_tg = await context.bot.get_file(imagem_msg.document.file_id)
+
+    if not arquivo_tg:
+        await mensagem.reply_text("⚠️ A mensagem respondida não contém uma imagem válida.")
+        return
+
+    if not gemini_client:
+        await mensagem.reply_text(t["rewrite_unavailable"])
+        return
+
+    status = await mensagem.reply_text("⏳ A analisar a imagem e a extrair o texto...")
+    pasta_temp = tempfile.mkdtemp(prefix="bot_ocr_imagem_")
+    mime_imagem = (
+        imagem_msg.document.mime_type
+        if imagem_msg.document
+        else "image/jpeg"
+    )
+    extensao = mimetypes.guess_extension(mime_imagem or "image/jpeg") or ".jpg"
+    caminho_imagem = os.path.join(pasta_temp, "imagem" + extensao)
+    arquivo_remoto = None
+
+    try:
+        await arquivo_tg.download_to_drive(custom_path=caminho_imagem)
+        arquivo_remoto = await asyncio.to_thread(
+            gemini_client.files.upload, file=caminho_imagem
+        )
+
+        tentativas_espera = 0
+        while (
+            getattr(arquivo_remoto, "state", None)
+            and getattr(arquivo_remoto.state, "name", "") == "PROCESSING"
+        ):
+            await asyncio.sleep(2)
+            arquivo_remoto = await asyncio.to_thread(
+                gemini_client.files.get, name=arquivo_remoto.name
+            )
+            tentativas_espera += 1
+            if tentativas_espera > 45:
+                raise TimeoutError("Tempo limite excedido ao processar a imagem.")
+
+        if (
+            getattr(arquivo_remoto, "state", None)
+            and getattr(arquivo_remoto.state, "name", "") == "FAILED"
+        ):
+            raise RuntimeError("Falha no processamento da imagem pela IA.")
+
+        prompt = """Extraia TODO o texto legível que aparece nesta imagem.
+Mantenha o idioma original, a ortografia, a pontuação e a ordem de leitura.
+Preserve as quebras de linha quando forem relevantes.
+Não traduza, não resuma, não corrija e não invente palavras.
+Se houver vários blocos de texto, extraia todos e separe-os por quebras de linha.
+Se não houver texto legível, responda apenas: NENHUM_TEXTO_ENCONTRADO.
+Responda somente com o texto extraído, sem introduções ou explicações."""
+
+        resposta = await asyncio.to_thread(
+            gemini_client.models.generate_content,
+            model="gemini-3.1-flash-lite",
+            contents=[arquivo_remoto, prompt],
+        )
+        texto_extraido = (resposta.text or "").strip()
+
+        if not texto_extraido or "NENHUM_TEXTO_ENCONTRADO" in texto_extraido:
+            await status.edit_text("⚠️ Não foi possível identificar texto legível na imagem.")
+            return
+
+        legenda_id = str(uuid.uuid4())[:8]
+        legendas_para_recriar[legenda_id] = {
+            "legenda": texto_extraido,
+            "video_message_id": imagem_msg.message_id,
+            "caption_message_id": status.message_id,
+        }
+        teclado = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(t["translate_extracted_button"], callback_data=f"traduzir_extraido:{legenda_id}"),
+                InlineKeyboardButton(t["rewrite_extracted_button"], callback_data=f"recriar_legenda:{legenda_id}"),
+            ]
+        ])
+        await status.edit_text(
+            f"📝 Texto extraído da imagem:\n\n{texto_extraido}",
+            reply_markup=teclado,
+        )
+
+    except Exception as e:
+        print(f"Erro ao extrair texto da imagem: {e}")
+        try:
+            await status.edit_text(t["rewrite_unavailable"])
+        except Exception:
+            pass
+    finally:
+        if arquivo_remoto is not None:
+            try:
+                await asyncio.to_thread(gemini_client.files.delete, name=arquivo_remoto.name)
+            except Exception as e:
+                print(f"Aviso ao limpar imagem remota Gemini: {e}")
+        shutil.rmtree(pasta_temp, ignore_errors=True)
 
 
 async def analisar_texto_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2141,6 +2262,8 @@ if __name__ == "__main__":
     app.add_handler(
         CommandHandler("meuid", meu_id)
     )
+
+    app.add_handler(CommandHandler("extrair", comando_extrair_imagem))
 
     app.add_handler(CommandHandler("cta", comando_cta))
     app.add_handler(CommandHandler("config_cta", configurar_cta))
