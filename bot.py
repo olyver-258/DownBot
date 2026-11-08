@@ -1859,17 +1859,15 @@ async def download_video(
                 with open(itens[0]["caminho"], "rb") as foto:
                     mensagem_video = await update.message.reply_photo(
                         photo=foto,
-                        caption=legenda_carrossel[:1024] if legenda_carrossel else None,
+                        # A legenda original será enviada depois, em mensagem separada,
+                        # tal como acontece com os vídeos.
                         reply_parameters=ReplyParameters(
                             message_id=update.message.message_id
                         ),
                     )
-                if len(legenda_carrossel) > 1024:
-                    await update.message.reply_text(legenda_carrossel[1024:])
 
             # CARROSSEL / CARROSSEL MISTO
             else:
-                legenda_enviada = False
                 for inicio_grupo in range(0, len(itens), 10):
                     grupo_itens = itens[inicio_grupo:inicio_grupo + 10]
 
@@ -1881,11 +1879,7 @@ async def download_video(
                             arquivo = open(item["caminho"], "rb")
                             arquivos_abertos.append(arquivo)
 
-                            caption_media = (
-                                legenda_carrossel[:1024]
-                                if legenda_carrossel and not legenda_enviada
-                                else None
-                            )
+                            caption_media = None
                             if item["tipo"] == "video":
                                 tem_video_enviado = True
                                 grupo.append(
@@ -1902,8 +1896,6 @@ async def download_video(
                                         caption=caption_media,
                                     )
                                 )
-                            if caption_media:
-                                legenda_enviada = True
 
                         mensagens = await update.message.reply_media_group(
                             media=grupo,
@@ -1930,8 +1922,6 @@ async def download_video(
                             except Exception:
                                 pass
 
-                if len(legenda_carrossel) > 1024:
-                    await update.message.reply_text(legenda_carrossel[1024:])
 
             if mensagem_video is None:
                 raise RuntimeError(
