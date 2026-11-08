@@ -378,7 +378,6 @@ async def editar_prompt_cta(context, chat_id, user_data, texto, **kwargs):
 
 
 async def configurar_menu(app):
-    # Menu público: comandos disponíveis para qualquer utilizador.
     comandos_publicos = [
         BotCommand("language", "🌍 Mudar idioma"),
         BotCommand("meuid", "🆔 Ver meu ID do Telegram"),
@@ -388,20 +387,24 @@ async def configurar_menu(app):
         scope=BotCommandScopeDefault(),
     )
 
-    # Menu exclusivo do administrador principal. O Telegram permite
-    # comandos diferentes por conversa, sem esconder os comandos do dono.
+    # Apenas o administrador principal vê os comandos de gestão.
     if ADMIN_ID:
         comandos_principais = comandos_publicos + [
             BotCommand("admins", "👥 Gerir membros premium"),
             BotCommand("cta", "📣 Gerir CTAs"),
             BotCommand("config_cta", "⚙️ Configurar CTAs"),
-            BotCommand("ctacancelar", "✖️ Cancelar configuração de CTA"),
-            BotCommand("stats", "📊 Estatísticas"),
-            BotCommand("manutencao", "🛠️ Manutenção"),
         ]
         await app.bot.set_my_commands(
             comandos_principais,
             scope=BotCommandScopeChat(chat_id=ADMIN_ID),
+        )
+
+    # Reaplica o menu público a cada membro premium; nunca lhes mostra
+    # comandos administrativos nem os comandos privados de CTA.
+    for membro_id in carregar_admins():
+        await app.bot.set_my_commands(
+            comandos_publicos,
+            scope=BotCommandScopeChat(chat_id=membro_id),
         )
 
 
@@ -426,7 +429,7 @@ def texto_lista_admins():
         linhas.extend(["", *[f"• `{uid}`" for uid in sorted(admins_ids)]])
     else:
         linhas.extend(["", "Ainda não adicionaste nenhum membro."])
-    return "\\n".join(linhas)
+    return "\n".join(linhas)
 
 
 async def painel_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -460,13 +463,13 @@ async def callbacks_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "admins_adicionar":
         context.user_data["aguardando_admin_id"] = "adicionar"
         await query.edit_message_text(
-            "➕ **Adicionar membro**\\n\\nEnvia agora o ID numérico do Telegram dessa pessoa.",
+            "➕ **Adicionar membro**\n\nEnvia agora o ID numérico do Telegram dessa pessoa.",
             parse_mode="Markdown",
         )
     elif data == "admins_remover":
         context.user_data["aguardando_admin_id"] = "remover"
         await query.edit_message_text(
-            "➖ **Remover membro**\\n\\nEnvia o ID numérico do membro que queres remover.",
+            "➖ **Remover membro**\n\nEnvia o ID numérico do membro que queres remover.",
             parse_mode="Markdown",
         )
     elif data == "admins_listar":
@@ -504,6 +507,13 @@ async def receber_id_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             admins_ids.add(user_id)
             try:
                 guardar_admins()
+                await context.bot.set_my_commands(
+                    [
+                        BotCommand("language", "🌍 Mudar idioma"),
+                        BotCommand("meuid", "🆔 Ver meu ID do Telegram"),
+                    ],
+                    scope=BotCommandScopeChat(chat_id=user_id),
+                )
                 resultado = f"✅ O ID `{user_id}` foi adicionado aos membros premium."
             except OSError as erro:
                 admins_ids.discard(user_id)
@@ -529,7 +539,7 @@ async def receber_id_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.edit_message_text(
                 chat_id=update.effective_chat.id,
                 message_id=mensagem_id,
-                text=resultado + "\\n\\n" + texto_lista_admins(),
+                text=resultado + "\n\n" + texto_lista_admins(),
                 parse_mode="Markdown",
                 reply_markup=teclado_admins(),
             )
@@ -543,53 +553,6 @@ async def receber_id_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================================================
 # COMANDOS ADMINISTRATIVOS
 # =========================================================
-
-async def manutencao(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        await apagar_comando(update)
-        return
-
-    enviados = 0
-    falhas = 0
-
-    for user_id in list(idiomas_usuarios.keys()):
-        try:
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=(
-                    "🛠️ O bot está em manutenção para melhorias e correções. "
-                    "Voltaremos em breve! 🚀"
-                ),
-            )
-            enviados += 1
-        except Exception as e:
-            print(f"Erro ao avisar {user_id}: {e}")
-            falhas += 1
-
-    await apagar_comando(update)
-    await resposta_temporaria(
-        update,
-        context,
-        f"📢 Aviso enviado!\n"
-        f"✅ Enviados: {enviados}\n"
-        f"❌ Falhas: {falhas}",
-    )
-
-
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        await apagar_comando(update)
-        return
-
-    await apagar_comando(update)
-    await resposta_temporaria(
-        update,
-        context,
-        "📊 Estatísticas do bot\n\n"
-        f"👥 Usuários nesta sessão: {len(idiomas_usuarios)}\n"
-        f"⏳ Downloads ativos: {len(usuarios_ocupados)}",
-    )
-
 
 async def meu_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await apagar_comando(update)
@@ -1617,7 +1580,6 @@ async def configurar_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text=(
             "⚙️ **Nova CTA**\n\n"
             "**1/4** Envia o nome do perfil (ex.: @PapiShow).\n"
-            "Cancelar: /ctacancelar"
         ),
         parse_mode="Markdown",
     )
@@ -1640,7 +1602,7 @@ async def receber_config_cta(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not texto:
         await editar_prompt_cta(
             context, update.effective_chat.id, context.user_data,
-            "⚠️ O campo não pode ficar vazio. Envia novamente ou usa /ctacancelar.",
+            "⚠️ O campo não pode ficar vazio. Envia novamente.",
         )
         raise ApplicationHandlerStop
 
@@ -1712,8 +1674,7 @@ async def callbacks_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("cta_nova", None)
         await query.edit_message_text(
             "⚙️ **Nova CTA**\n\n"
-            "**1/4** Envia o nome do perfil (ex.: @PapiShow).\n"
-            "Cancelar: /ctacancelar",
+            "**1/4** Envia o nome do perfil (ex.: @PapiShow).",
             parse_mode="Markdown",
         )
 
@@ -1749,8 +1710,7 @@ async def callbacks_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if cat == "personalizada":
             context.user_data["configurando_cta"] = "texto"
             await query.edit_message_text(
-                f"✍️ Envia o texto da CTA para **@{escape_markdown(nome_perfil)}**.\n"
-                "Cancelar: /ctacancelar",
+                f"✍️ Envia o texto da CTA para **@{escape_markdown(nome_perfil)}**.\n",
                 parse_mode="Markdown",
             )
             return
@@ -1844,24 +1804,6 @@ async def callbacks_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "cta_fechar":
         context.user_data.pop("cta_panel_message_id", None)
         await query.edit_message_text("Painel de CTAs fechado.")
-
-
-async def cancelar_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        await apagar_comando(update)
-        await resposta_temporaria(update, context, "Esta função é privada.")
-        return
-
-    await apagar_comando(update)
-    context.user_data.pop("configurando_cta", None)
-    context.user_data.pop("cta_nova", None)
-    await editar_prompt_cta(
-        context,
-        update.effective_chat.id,
-        context.user_data,
-        "✖️ Configuração de CTA cancelada.",
-    )
-    context.user_data.pop("cta_prompt_message_id", None)
 
 
 async def reagir_falha(update, context):
@@ -2327,14 +2269,6 @@ if __name__ == "__main__":
         CommandHandler("meuid", meu_id)
     )
 
-    app.add_handler(
-        CommandHandler("stats", stats)
-    )
-
-    app.add_handler(
-        CommandHandler("manutencao", manutencao)
-    )
-
     app.add_handler(CommandHandler("admins", painel_admins))
     app.add_handler(
         CallbackQueryHandler(
@@ -2351,7 +2285,6 @@ if __name__ == "__main__":
 
     app.add_handler(CommandHandler("cta", comando_cta))
     app.add_handler(CommandHandler("config_cta", configurar_cta))
-    app.add_handler(CommandHandler("ctacancelar", cancelar_cta))
     app.add_handler(
         CallbackQueryHandler(
             callbacks_cta,
