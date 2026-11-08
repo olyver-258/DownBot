@@ -10,6 +10,7 @@ import asyncio
 import tempfile
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from telegram.helpers import escape_markdown
@@ -38,7 +39,6 @@ from telegram.ext import (
 )
 
 import yt_dlp
-import instaloader
 from google import genai
 
 
@@ -600,75 +600,8 @@ def baixar_video(url, pasta_temp):
 # DOWNLOAD DE IMAGENS/CARROSSEL DO INSTAGRAM
 # =========================================================
 
-def criar_loader_instagram():
-    """Cria o Instaloader e aplica o sessionid opcional do Instagram."""
-    loader = instaloader.Instaloader(
-        download_pictures=False,
-        download_videos=False,
-        download_video_thumbnails=False,
-        download_geotags=False,
-        download_comments=False,
-        save_metadata=False,
-        compress_json=False,
-        quiet=True,
-    )
-
-    sessionid = (os.getenv("INSTAGRAM_SESSIONID") or "").strip()
-    if sessionid:
-        # O cookie fica apenas na variável de ambiente do servidor.
-        loader.context._session.cookies.set(
-            "sessionid",
-            sessionid,
-            domain=".instagram.com",
-            path="/",
-        )
-        print("🍪 Sessão do Instagram carregada para o Instaloader.")
-    else:
-        print("ℹ️ INSTAGRAM_SESSIONID não configurado; Instagram em modo público.")
-
-    return loader
-
-
 def detectar_tipo_instagram(url):
-    """
-    Retorna:
-    - foto
-    - carrossel
-    - video
-    """
-    match = re.search(
-        r"instagram\.com/(?:p|reel)/([^/?#]+)",
-        url,
-        re.IGNORECASE,
-    )
-
-    if not match:
-        raise ValueError(
-            "Não foi possível identificar o post do Instagram."
-        )
-
-    shortcode = match.group(1)
-
-    if "/reel/" in url.lower():
-        return "video", None
-
-    loader = criar_loader_instagram()
-
-    post = instaloader.Post.from_shortcode(
-        loader.context,
-        shortcode,
-    )
-
-    if post.typename == "GraphSidecar":
-        return "carrossel", post
-
-    if post.is_video:
-        return "video", post
-
-    return "foto", post
-
-
-def baixar_instagram_instaloader(url, pasta_temp, post=None):
+    """Identifica Reels como vídeo; posts /p/ são processados pelo gallery-dl."""
     match = re.search(
         r"instagram\.com/(?:p|reel)/([^/?#]+)",
         url,
@@ -678,88 +611,82 @@ def baixar_instagram_instaloader(url, pasta_temp, post=None):
     if not match:
         raise ValueError("Não foi possível identificar o post do Instagram.")
 
-    shortcode = match.group(1)
+    if "/reel/" in url.lower():
+        return "video", None
 
-    # Mesmo quando o post veio da detecção inicial, cria-se um contexto
-    # autenticado para descarregar as imagens usando a sessão configurada.
-    loader = criar_loader_instagram()
+    # Não consulta GraphQL nesta fase. O gallery-dl fará a extração do post,
+    # incluindo fotos, carrosséis e vídeos publicados em /p/.
+    return "foto", None
 
-    if post is None:
-        post = instaloader.Post.from_shortcode(
-            loader.context,
-            shortcode,
-        )
 
-    legenda = post.caption or ""
+def baixar_instagram_gallerydl(url, pasta_temp, post=None):
+    """Descarrega fotos/carrosséis do Instagram com gallery-dl e cookie opcional."""
+    sessionid = (os.getenv("INSTAGRAM_SESSIONID") or "").strip()
+    config_path = os.path.join(pasta_temp, "gallery-dl-config.json")
+    config = {"extractor": {"instagram": {}}}
 
-    if post.typename == "GraphVideo":
-        return {
-            "tipo": "video_unico",
-            "arquivos": [],
-            "legenda": legenda,
+    if sessionid:
+        config["extractor"]["instagram"]["cookies"] = {
+            "sessionid": sessionid
         }
 
+    with open(config_path, "w", encoding="utf-8") as config_file:
+        json.dump(config, config_file)
+
+    comando = [
+        sys.executable,
+        "-m",
+        "gallery_dl",
+        "--config",
+        config_path,
+        "--directory",
+        pasta_temp,
+        "--filename",
+        "{num:>02}.{extension}",
+        url,
+    ]
+
+    resultado = subprocess.run(
+        comando,
+        capture_output=True,
+        text=True,
+        timeout=240,
+        check=False,
+    )
+
+    extensoes_foto = {".jpg", ".jpeg", ".png", ".webp"}
+    extensoes_video = {".mp4", ".m4v", ".mov", ".webm"}
     itens = []
 
-    if post.typename == "GraphSidecar":
-        nodes = list(post.get_sidecar_nodes())
+    for raiz, _, nomes in os.walk(pasta_temp):
+        for nome in nomes:
+            caminho = os.path.join(raiz, nome)
+            extensao = os.path.splitext(nome)[1].lower()
+            if extensao in extensoes_foto:
+                itens.append({"tipo": "foto", "caminho": caminho})
+            elif extensao in extensoes_video:
+                itens.append({"tipo": "video", "caminho": caminho})
 
-        for indice, node in enumerate(nodes, start=1):
-            if node.is_video:
-                url_media = node.video_url
-                extensao = ".mp4"
-                tipo = "video"
-            else:
-                url_media = node.display_url
-                extensao = ".jpg"
-                tipo = "foto"
+    itens.sort(key=lambda item: item["caminho"])
 
-            caminho = os.path.join(
-                pasta_temp,
-                f"{indice:02d}_{tipo}{extensao}",
-            )
-
-            itens.append({
-                "tipo": tipo,
-                "url": url_media,
-                "caminho": caminho,
-            })
-
-    else:
-        caminho = os.path.join(
-            pasta_temp,
-            "01_foto.jpg",
+    if resultado.returncode != 0 or not itens:
+        detalhe = (resultado.stderr or resultado.stdout or "Sem detalhes do gallery-dl").strip()
+        raise RuntimeError(
+            "gallery-dl não conseguiu descarregar a publicação do Instagram: "
+            + detalhe[-1800:]
         )
 
-        itens.append({
-            "tipo": "foto",
-            "url": post.url,
-            "caminho": caminho,
-        })
-
-    from concurrent.futures import ThreadPoolExecutor
-
-    def descarregar_item(item):
-        # Usa a sessão do Instaloader para que o cookie também seja aplicado
-        # aos pedidos de mídia, quando o Instagram exigir autenticação.
-        resposta = loader.context.get_raw(item["url"])
-        resposta.raise_for_status()
-        with open(item["caminho"], "wb") as arquivo:
-            arquivo.write(resposta.content)
-
-    # Carrosséis são descarregados em paralelo, limitando a concorrência
-    # para não sobrecarregar a ligação nem o servidor do Instagram.
-    with ThreadPoolExecutor(max_workers=min(4, max(1, len(itens)))) as executor:
-        list(executor.map(descarregar_item, itens))
+    # Remove o ficheiro temporário de configuração para não deixar o cookie
+    # guardado em disco após a execução do download.
+    try:
+        os.remove(config_path)
+    except OSError:
+        pass
 
     return {
-        "tipo": (
-            "carrossel"
-            if post.typename == "GraphSidecar"
-            else "foto"
-        ),
+        "tipo": "carrossel" if len(itens) > 1 else "foto",
         "arquivos": itens,
-        "legenda": legenda,
+        "legenda": "",
     }
 
 
@@ -1817,7 +1744,7 @@ async def download_video(
             if tipo_instagram in ("foto", "carrossel"):
                 resultado_instagram = await loop.run_in_executor(
                     None,
-                    baixar_instagram_instaloader,
+                    baixar_instagram_gallerydl,
                     url,
                     pasta_temp,
                     post_instagram,
@@ -2232,8 +2159,8 @@ if __name__ == "__main__":
     )
 
     print("Bot rodando...")
-    print("Plataformas: Instagram (fotos/carrosséis via Instaloader) | TikTok | Facebook | Twitter/X | Pinterest")
-    print("Instagram autenticado: " + ("sim" if os.getenv("INSTAGRAM_SESSIONID") else "não (modo público)"))
+    print("Plataformas: Instagram (fotos/carrosséis via gallery-dl) | TikTok | Facebook | Twitter/X | Pinterest")
+    print("Instagram cookie configurado: " + ("sim" if os.getenv("INSTAGRAM_SESSIONID") else "não (modo público)"))
 
     app.run_polling(
         drop_pending_updates=True

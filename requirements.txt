@@ -10,3 +10,4 @@ yt-dlp
 google-genai
 instaloader==4.15.3
 python-dotenv
+gallery-dl
