@@ -643,6 +643,7 @@ def baixar_instagram_gallerydl(url, pasta_temp, post=None):
         pasta_temp,
         "--filename",
         "{num:>02}.{extension}",
+        "--write-metadata",
         url,
     ]
 
@@ -669,6 +670,46 @@ def baixar_instagram_gallerydl(url, pasta_temp, post=None):
 
     itens.sort(key=lambda item: item["caminho"])
 
+    # O gallery-dl guarda os metadados de cada ficheiro em JSON.
+    # A descrição/caption é a mesma para todas as imagens do carrossel.
+    legenda = ""
+
+    def procurar_legenda(dados):
+        if isinstance(dados, dict):
+            for chave in ("description", "caption", "caption_text"):
+                valor = dados.get(chave)
+                if isinstance(valor, str) and valor.strip():
+                    return valor.strip()
+                if isinstance(valor, dict):
+                    texto = valor.get("text") or valor.get("description")
+                    if isinstance(texto, str) and texto.strip():
+                        return texto.strip()
+            for valor in dados.values():
+                encontrada = procurar_legenda(valor)
+                if encontrada:
+                    return encontrada
+        elif isinstance(dados, list):
+            for valor in dados:
+                encontrada = procurar_legenda(valor)
+                if encontrada:
+                    return encontrada
+        return ""
+
+    for raiz, _, nomes in os.walk(pasta_temp):
+        for nome in nomes:
+            if not nome.lower().endswith(".json") or nome == "gallery-dl-config.json":
+                continue
+            caminho_json = os.path.join(raiz, nome)
+            try:
+                with open(caminho_json, "r", encoding="utf-8") as arquivo_json:
+                    legenda = procurar_legenda(json.load(arquivo_json))
+                if legenda:
+                    break
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+                continue
+        if legenda:
+            break
+
     if resultado.returncode != 0 or not itens:
         detalhe = (resultado.stderr or resultado.stdout or "Sem detalhes do gallery-dl").strip()
         raise RuntimeError(
@@ -686,7 +727,7 @@ def baixar_instagram_gallerydl(url, pasta_temp, post=None):
     return {
         "tipo": "carrossel" if len(itens) > 1 else "foto",
         "arquivos": itens,
-        "legenda": "",
+        "legenda": legenda,
     }
 
 
@@ -1792,6 +1833,9 @@ async def download_video(
         # =====================================================
         if resultado_instagram is not None:
             itens = resultado_instagram["arquivos"]
+            legenda_carrossel = (
+                legenda if resultado_instagram["tipo"] == "carrossel" else ""
+            )
 
             if not itens:
                 raise FileNotFoundError(
@@ -1815,13 +1859,17 @@ async def download_video(
                 with open(itens[0]["caminho"], "rb") as foto:
                     mensagem_video = await update.message.reply_photo(
                         photo=foto,
+                        caption=legenda_carrossel[:1024] if legenda_carrossel else None,
                         reply_parameters=ReplyParameters(
                             message_id=update.message.message_id
                         ),
                     )
+                if len(legenda_carrossel) > 1024:
+                    await update.message.reply_text(legenda_carrossel[1024:])
 
             # CARROSSEL / CARROSSEL MISTO
             else:
+                legenda_enviada = False
                 for inicio_grupo in range(0, len(itens), 10):
                     grupo_itens = itens[inicio_grupo:inicio_grupo + 10]
 
@@ -1833,11 +1881,17 @@ async def download_video(
                             arquivo = open(item["caminho"], "rb")
                             arquivos_abertos.append(arquivo)
 
+                            caption_media = (
+                                legenda_carrossel[:1024]
+                                if legenda_carrossel and not legenda_enviada
+                                else None
+                            )
                             if item["tipo"] == "video":
                                 tem_video_enviado = True
                                 grupo.append(
                                     InputMediaVideo(
                                         media=arquivo,
+                                        caption=caption_media,
                                         supports_streaming=True,
                                     )
                                 )
@@ -1845,8 +1899,11 @@ async def download_video(
                                 grupo.append(
                                     InputMediaPhoto(
                                         media=arquivo,
+                                        caption=caption_media,
                                     )
                                 )
+                            if caption_media:
+                                legenda_enviada = True
 
                         mensagens = await update.message.reply_media_group(
                             media=grupo,
@@ -1872,6 +1929,9 @@ async def download_video(
                                 arquivo.close()
                             except Exception:
                                 pass
+
+                if len(legenda_carrossel) > 1024:
+                    await update.message.reply_text(legenda_carrossel[1024:])
 
             if mensagem_video is None:
                 raise RuntimeError(
