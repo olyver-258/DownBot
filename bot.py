@@ -158,6 +158,34 @@ def guardar_ctas():
 
 ctas_perfis = carregar_ctas()
 
+# CTAs antigas, criadas antes da separação por membro, continuam pertencendo
+# ao administrador principal. Novas CTAs recebem o ID de quem as criou.
+for _perfil_cta in ctas_perfis.values():
+    if isinstance(_perfil_cta, dict):
+        _perfil_cta.setdefault("owner_id", ADMIN_ID)
+
+
+def pode_gerir_cta(user_id, perfil):
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return False
+    return user_id == ADMIN_ID or int(perfil.get("owner_id", ADMIN_ID)) == user_id
+
+
+def comandos_publicos():
+    return [
+        BotCommand("language", "🌍 Mudar idioma"),
+        BotCommand("meuid", "🆔 Ver meu ID do Telegram"),
+    ]
+
+
+def comandos_premium():
+    return comandos_publicos() + [
+        BotCommand("cta", "📣 Gerir minhas CTAs"),
+        BotCommand("config_cta", "⚙️ Criar uma CTA"),
+    ]
+
 
 # =========================================================
 # TEXTOS / IDIOMAS (APENAS PORTUGUÊS E INGLÊS)
@@ -378,32 +406,22 @@ async def editar_prompt_cta(context, chat_id, user_data, texto, **kwargs):
 
 
 async def configurar_menu(app):
-    comandos_publicos = [
-        BotCommand("language", "🌍 Mudar idioma"),
-        BotCommand("meuid", "🆔 Ver meu ID do Telegram"),
-    ]
     await app.bot.set_my_commands(
-        comandos_publicos,
+        comandos_publicos(),
         scope=BotCommandScopeDefault(),
     )
 
-    # Apenas o administrador principal vê os comandos de gestão.
+    # Menu completo apenas para o administrador principal.
     if ADMIN_ID:
-        comandos_principais = comandos_publicos + [
-            BotCommand("admins", "👥 Gerir membros premium"),
-            BotCommand("cta", "📣 Gerir CTAs"),
-            BotCommand("config_cta", "⚙️ Configurar CTAs"),
-        ]
         await app.bot.set_my_commands(
-            comandos_principais,
+            comandos_premium() + [BotCommand("admins", "👥 Gerir membros premium")],
             scope=BotCommandScopeChat(chat_id=ADMIN_ID),
         )
 
-    # Reaplica o menu público a cada membro premium; nunca lhes mostra
-    # comandos administrativos nem os comandos privados de CTA.
+    # Cada membro premium recebe o menu das funções premium, sem gestão de membros.
     for membro_id in carregar_admins():
         await app.bot.set_my_commands(
-            comandos_publicos,
+            comandos_premium(),
             scope=BotCommandScopeChat(chat_id=membro_id),
         )
 
@@ -508,10 +526,7 @@ async def receber_id_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 guardar_admins()
                 await context.bot.set_my_commands(
-                    [
-                        BotCommand("language", "🌍 Mudar idioma"),
-                        BotCommand("meuid", "🆔 Ver meu ID do Telegram"),
-                    ],
+                    comandos_premium(),
                     scope=BotCommandScopeChat(chat_id=user_id),
                 )
                 resultado = f"✅ O ID `{user_id}` foi adicionado aos membros premium."
@@ -526,6 +541,10 @@ async def receber_id_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             admins_ids.remove(user_id)
             try:
                 guardar_admins()
+                await context.bot.set_my_commands(
+                    comandos_publicos(),
+                    scope=BotCommandScopeChat(chat_id=user_id),
+                )
                 resultado = f"✅ O ID `{user_id}` foi removido dos membros premium."
             except OSError as erro:
                 admins_ids.add(user_id)
@@ -1324,8 +1343,13 @@ async def gerar_legenda_recriada(update: Update, context: ContextTypes.DEFAULT_T
     if partes[0] == "recriar_idioma":
         botoes = []
         # Ordena exibindo primeiro os perfis do mesmo idioma escolhido
+        perfis_do_utilizador = [
+            (perfil_id, perfil)
+            for perfil_id, perfil in ctas_perfis.items()
+            if pode_gerir_cta(user_id, perfil)
+        ]
         perfis_ordenados = sorted(
-            ctas_perfis.items(),
+            perfis_do_utilizador,
             key=lambda item: (0 if item[1].get("idioma") == idioma_codigo else 1, item[1].get("nome", "")),
         )
 
@@ -1362,8 +1386,8 @@ async def gerar_legenda_recriada(update: Update, context: ContextTypes.DEFAULT_T
 
     if perfil_id != "sem_cta":
         perfil = ctas_perfis.get(perfil_id)
-        if not perfil:
-            await query.edit_message_text("❌ Esse perfil já não existe. Tenta recriar a legenda novamente.")
+        if not perfil or not pode_gerir_cta(user_id, perfil):
+            await query.edit_message_text("❌ Essa CTA não existe ou não pertence à tua conta.")
             return
         cta_escolhida = str(perfil.get("texto", "")).strip()
         modo_cta = perfil.get("modo", "fixo")
@@ -1504,19 +1528,24 @@ def normalizar_username_instagram(valor):
     return username
 
 
-def _montar_painel_ctas():
-    """Painel compacto de perfis e respetivos modos de CTA."""
-    if not ctas_perfis:
-        texto = "📋 **CTAs**\n\nAinda não há perfis. Cria a primeira CTA abaixo."
+def _montar_painel_ctas(user_id):
+    """Mostra ao utilizador apenas as CTAs que pode gerir."""
+    perfis_visiveis = [
+        (perfil_id, perfil)
+        for perfil_id, perfil in ctas_perfis.items()
+        if pode_gerir_cta(user_id, perfil)
+    ]
+    if not perfis_visiveis:
+        texto = "📋 **As minhas CTAs**\n\nAinda não tens CTAs. Cria a primeira abaixo."
         teclado = InlineKeyboardMarkup([
             [InlineKeyboardButton("➕ Nova CTA", callback_data="cta_nova_iniciar")],
             [InlineKeyboardButton("Fechar", callback_data="cta_fechar")],
         ])
         return texto, teclado
 
-    linhas = ["📋 **CTAs configuradas**"]
+    linhas = ["📋 **As minhas CTAs**"]
     botoes = []
-    for perfil_id, perfil in ctas_perfis.items():
+    for perfil_id, perfil in perfis_visiveis:
         nome = str(perfil.get("nome", "Perfil"))
         idioma_codigo = str(perfil.get("idioma", "pt")).lower()
         idioma = "PT-BR" if idioma_codigo == "pt" else "ENG-US"
@@ -1534,9 +1563,9 @@ def _montar_painel_ctas():
 
 
 async def comando_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not eh_admin(update.effective_user.id):
         await apagar_comando(update)
-        await resposta_temporaria(update, context, "Esta função é privada.")
+        await resposta_temporaria(update, context, "Esta função é exclusiva dos membros premium.")
         return
 
     await apagar_comando(update)
@@ -1547,7 +1576,7 @@ async def comando_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-    texto, teclado = _montar_painel_ctas()
+    texto, teclado = _montar_painel_ctas(update.effective_user.id)
     mensagem = await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=texto,
@@ -1558,12 +1587,13 @@ async def comando_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def configurar_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not eh_admin(update.effective_user.id):
         await apagar_comando(update)
-        await resposta_temporaria(update, context, "Esta função é privada.")
+        await resposta_temporaria(update, context, "Esta função é exclusiva dos membros premium.")
         return
 
     await apagar_comando(update)
+    context.user_data["cta_owner_id"] = update.effective_user.id
     prompt_anterior = context.user_data.get("cta_prompt_message_id")
     if prompt_anterior:
         try:
@@ -1587,7 +1617,7 @@ async def configurar_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def receber_config_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    if not eh_admin(update.effective_user.id):
         return
     etapa = context.user_data.get("configurando_cta")
     if not etapa:
@@ -1646,13 +1676,15 @@ async def receber_config_cta(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 def _salvar_finalizar_cta(context):
-    perfil = context.user_data.get("cta_nova", {})
+    perfil = context.user_data.get("cta_nova", {}).copy()
+    perfil["owner_id"] = int(context.user_data.get("cta_owner_id", ADMIN_ID))
     perfil_id = uuid.uuid4().hex[:10]
     ctas_perfis[perfil_id] = perfil
     try:
         guardar_ctas()
         context.user_data.pop("cta_nova", None)
         context.user_data.pop("configurando_cta", None)
+        context.user_data.pop("cta_owner_id", None)
         return True, perfil
     except OSError as e:
         ctas_perfis.pop(perfil_id, None)
@@ -1662,13 +1694,15 @@ def _salvar_finalizar_cta(context):
 
 async def callbacks_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    if update.effective_user.id != ADMIN_ID:
-        await query.answer("Esta função é privada.", show_alert=True)
+    user_id = update.effective_user.id
+    if not eh_admin(user_id):
+        await query.answer("Esta função é exclusiva dos membros premium.", show_alert=True)
         return
     await query.answer()
     data = query.data or ""
 
     if data == "cta_nova_iniciar":
+        context.user_data["cta_owner_id"] = user_id
         context.user_data["cta_prompt_message_id"] = query.message.message_id
         context.user_data["configurando_cta"] = "nome"
         context.user_data.pop("cta_nova", None)
@@ -1768,7 +1802,7 @@ async def callbacks_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🌍 **Idioma:** {'PT-BR' if perfil['idioma'] == 'pt' else 'ENG-US'}\n"
                 f"⚙️ **Inserção:** {modo_str}\n"
                 f"📝 **Texto:** {escape_markdown(perfil['texto'])}\n\n"
-                "Gerencie todas as suas CTAs em /cta.",
+                "Gerencie as suas CTAs em /cta.",
                 parse_mode="Markdown",
             )
         else:
@@ -1777,24 +1811,25 @@ async def callbacks_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("cta_alternar_modo:"):
         perfil_id = data.split(":", 1)[1]
         perfil = ctas_perfis.get(perfil_id)
-        if not perfil:
-            await query.edit_message_text("Esse perfil já não existe.")
+        if not perfil or not pode_gerir_cta(user_id, perfil):
+            await query.answer("Não tens permissão para alterar esta CTA.", show_alert=True)
             return
         modo_atual = perfil.get("modo", "fixo")
         perfil["modo"] = "contextual" if modo_atual == "fixo" else "fixo"
         guardar_ctas()
-        texto, teclado = _montar_painel_ctas()
+        texto, teclado = _montar_painel_ctas(user_id)
         await query.edit_message_text(texto, parse_mode="Markdown", reply_markup=teclado)
 
     elif data.startswith("cta_remover:"):
         perfil_id = data.split(":", 1)[1]
-        perfil = ctas_perfis.pop(perfil_id, None)
-        if not perfil:
-            await query.edit_message_text("Esse perfil já não existe.")
+        perfil = ctas_perfis.get(perfil_id)
+        if not perfil or not pode_gerir_cta(user_id, perfil):
+            await query.answer("Não tens permissão para remover esta CTA.", show_alert=True)
             return
+        perfil = ctas_perfis.pop(perfil_id)
         try:
             guardar_ctas()
-            texto, teclado = _montar_painel_ctas()
+            texto, teclado = _montar_painel_ctas(user_id)
             await query.edit_message_text(texto, parse_mode="Markdown", reply_markup=teclado)
         except OSError as e:
             ctas_perfis[perfil_id] = perfil
