@@ -89,14 +89,6 @@ def carregar_admins():
         return set()
 
 
-def guardar_admins():
-    ADMINS_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    temporario = ADMINS_CONFIG_PATH.with_suffix(ADMINS_CONFIG_PATH.suffix + ".tmp")
-    with open(temporario, "w", encoding="utf-8") as arquivo:
-        json.dump(sorted(admins_ids), arquivo, ensure_ascii=False, indent=2)
-    temporario.replace(ADMINS_CONFIG_PATH)
-
-
 admins_ids = carregar_admins()
 
 
@@ -414,7 +406,7 @@ async def configurar_menu(app):
     # Menu completo apenas para o administrador principal.
     if ADMIN_ID:
         await app.bot.set_my_commands(
-            comandos_premium() + [BotCommand("admins", "👥 Gerir membros premium")],
+            comandos_premium(),
             scope=BotCommandScopeChat(chat_id=ADMIN_ID),
         )
 
@@ -424,149 +416,6 @@ async def configurar_menu(app):
             comandos_premium(),
             scope=BotCommandScopeChat(chat_id=membro_id),
         )
-
-
-# =========================================================
-# GESTÃO DE MEMBROS ADMINISTRADORES (SÓ O ADMIN PRINCIPAL)
-# =========================================================
-
-def teclado_admins():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ Adicionar novo membro", callback_data="admins_adicionar")],
-        [InlineKeyboardButton("👥 Ver membros", callback_data="admins_listar")],
-        [InlineKeyboardButton("➖ Remover membro", callback_data="admins_remover")],
-        [InlineKeyboardButton("Fechar", callback_data="admins_fechar")],
-    ])
-
-
-def texto_lista_admins():
-    admins_ids.clear()
-    admins_ids.update(carregar_admins())
-    linhas = ["👥 **Membros com acesso premium**", "", f"👑 Admin principal: `{ADMIN_ID}`"]
-    if admins_ids:
-        linhas.extend(["", *[f"• `{uid}`" for uid in sorted(admins_ids)]])
-    else:
-        linhas.extend(["", "Ainda não adicionaste nenhum membro."])
-    return "\n".join(linhas)
-
-
-async def painel_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        await apagar_comando(update)
-        return
-    await apagar_comando(update)
-    anterior = context.user_data.get("admins_panel_message_id")
-    if anterior:
-        try:
-            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=anterior)
-        except Exception:
-            pass
-    mensagem = await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=texto_lista_admins(),
-        parse_mode="Markdown",
-        reply_markup=teclado_admins(),
-    )
-    context.user_data["admins_panel_message_id"] = mensagem.message_id
-
-
-async def callbacks_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if update.effective_user.id != ADMIN_ID:
-        await query.answer("Apenas o administrador principal pode gerir membros.", show_alert=True)
-        return
-    await query.answer()
-    data = query.data or ""
-
-    if data == "admins_adicionar":
-        context.user_data["aguardando_admin_id"] = "adicionar"
-        await query.edit_message_text(
-            "➕ **Adicionar membro**\n\nEnvia agora o ID numérico do Telegram dessa pessoa.",
-            parse_mode="Markdown",
-        )
-    elif data == "admins_remover":
-        context.user_data["aguardando_admin_id"] = "remover"
-        await query.edit_message_text(
-            "➖ **Remover membro**\n\nEnvia o ID numérico do membro que queres remover.",
-            parse_mode="Markdown",
-        )
-    elif data == "admins_listar":
-        await query.edit_message_text(
-            texto_lista_admins(), parse_mode="Markdown", reply_markup=teclado_admins()
-        )
-    elif data == "admins_fechar":
-        context.user_data.pop("aguardando_admin_id", None)
-        context.user_data.pop("admins_panel_message_id", None)
-        await query.edit_message_text("Painel de membros fechado.")
-
-
-async def receber_id_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    acao = context.user_data.get("aguardando_admin_id")
-    if not acao or update.effective_user.id != ADMIN_ID:
-        return
-
-    texto = (update.message.text or "").strip()
-    try:
-        await update.message.delete()
-    except Exception:
-        pass
-
-    if not texto.isdigit() or int(texto) <= 0:
-        await resposta_temporaria(update, context, "❌ ID inválido. Envia apenas números.")
-        raise ApplicationHandlerStop
-
-    user_id = int(texto)
-    if user_id == ADMIN_ID:
-        resultado = "ℹ️ Esse ID já é o administrador principal."
-    elif acao == "adicionar":
-        if user_id in admins_ids:
-            resultado = "ℹ️ Esse membro já tem acesso premium."
-        else:
-            admins_ids.add(user_id)
-            try:
-                guardar_admins()
-                await context.bot.set_my_commands(
-                    comandos_premium(),
-                    scope=BotCommandScopeChat(chat_id=user_id),
-                )
-                resultado = f"✅ O ID `{user_id}` foi adicionado aos membros premium."
-            except OSError as erro:
-                admins_ids.discard(user_id)
-                print(f"Erro ao guardar membros administradores: {erro}")
-                resultado = "❌ Não consegui guardar a alteração. Verifica o volume persistente."
-    else:
-        if user_id not in admins_ids:
-            resultado = "ℹ️ Esse ID não está na lista de membros."
-        else:
-            admins_ids.remove(user_id)
-            try:
-                guardar_admins()
-                await context.bot.set_my_commands(
-                    comandos_publicos(),
-                    scope=BotCommandScopeChat(chat_id=user_id),
-                )
-                resultado = f"✅ O ID `{user_id}` foi removido dos membros premium."
-            except OSError as erro:
-                admins_ids.add(user_id)
-                print(f"Erro ao guardar membros administradores: {erro}")
-                resultado = "❌ Não consegui guardar a alteração. Verifica o volume persistente."
-
-    context.user_data.pop("aguardando_admin_id", None)
-    mensagem_id = context.user_data.get("admins_panel_message_id")
-    if mensagem_id:
-        try:
-            await context.bot.edit_message_text(
-                chat_id=update.effective_chat.id,
-                message_id=mensagem_id,
-                text=resultado + "\n\n" + texto_lista_admins(),
-                parse_mode="Markdown",
-                reply_markup=teclado_admins(),
-            )
-        except Exception:
-            await resposta_temporaria(update, context, resultado)
-    else:
-        await resposta_temporaria(update, context, resultado)
-    raise ApplicationHandlerStop
 
 
 # =========================================================
@@ -751,6 +600,35 @@ def baixar_video(url, pasta_temp):
 # DOWNLOAD DE IMAGENS/CARROSSEL DO INSTAGRAM
 # =========================================================
 
+def criar_loader_instagram():
+    """Cria o Instaloader e aplica o sessionid opcional do Instagram."""
+    loader = instaloader.Instaloader(
+        download_pictures=False,
+        download_videos=False,
+        download_video_thumbnails=False,
+        download_geotags=False,
+        download_comments=False,
+        save_metadata=False,
+        compress_json=False,
+        quiet=True,
+    )
+
+    sessionid = (os.getenv("INSTAGRAM_SESSIONID") or "").strip()
+    if sessionid:
+        # O cookie fica apenas na variável de ambiente do servidor.
+        loader.context._session.cookies.set(
+            "sessionid",
+            sessionid,
+            domain=".instagram.com",
+            path="/",
+        )
+        print("🍪 Sessão do Instagram carregada para o Instaloader.")
+    else:
+        print("ℹ️ INSTAGRAM_SESSIONID não configurado; Instagram em modo público.")
+
+    return loader
+
+
 def detectar_tipo_instagram(url):
     """
     Retorna:
@@ -774,16 +652,7 @@ def detectar_tipo_instagram(url):
     if "/reel/" in url.lower():
         return "video", None
 
-    loader = instaloader.Instaloader(
-        download_pictures=False,
-        download_videos=False,
-        download_video_thumbnails=False,
-        download_geotags=False,
-        download_comments=False,
-        save_metadata=False,
-        compress_json=False,
-        quiet=True,
-    )
+    loader = criar_loader_instagram()
 
     post = instaloader.Post.from_shortcode(
         loader.context,
@@ -811,18 +680,11 @@ def baixar_instagram_instaloader(url, pasta_temp, post=None):
 
     shortcode = match.group(1)
 
-    if post is None:
-        loader = instaloader.Instaloader(
-            download_pictures=False,
-            download_videos=False,
-            download_video_thumbnails=False,
-            download_geotags=False,
-            download_comments=False,
-            save_metadata=False,
-            compress_json=False,
-            quiet=True,
-        )
+    # Mesmo quando o post veio da detecção inicial, cria-se um contexto
+    # autenticado para descarregar as imagens usando a sessão configurada.
+    loader = criar_loader_instagram()
 
+    if post is None:
         post = instaloader.Post.from_shortcode(
             loader.context,
             shortcode,
@@ -875,16 +737,15 @@ def baixar_instagram_instaloader(url, pasta_temp, post=None):
             "caminho": caminho,
         })
 
-    import urllib.request
     from concurrent.futures import ThreadPoolExecutor
 
     def descarregar_item(item):
-        request = urllib.request.Request(
-            item["url"], headers={"User-Agent": "Mozilla/5.0"}
-        )
-        with urllib.request.urlopen(request, timeout=35) as resposta:
-            with open(item["caminho"], "wb") as arquivo:
-                shutil.copyfileobj(resposta, arquivo)
+        # Usa a sessão do Instaloader para que o cookie também seja aplicado
+        # aos pedidos de mídia, quando o Instagram exigir autenticação.
+        resposta = loader.context.get_raw(item["url"])
+        resposta.raise_for_status()
+        with open(item["caminho"], "wb") as arquivo:
+            arquivo.write(resposta.content)
 
     # Carrosséis são descarregados em paralelo, limitando a concorrência
     # para não sobrecarregar a ligação nem o servidor do Instagram.
@@ -2304,20 +2165,6 @@ if __name__ == "__main__":
         CommandHandler("meuid", meu_id)
     )
 
-    app.add_handler(CommandHandler("admins", painel_admins))
-    app.add_handler(
-        CallbackQueryHandler(
-            callbacks_admins,
-            pattern=r"^admins_(adicionar|remover|listar|fechar)$",
-        )
-    )
-
-    # Só intercepta texto quando o admin principal está a inserir um ID.
-    app.add_handler(
-        MessageHandler(filters.TEXT & (~filters.COMMAND), receber_id_admin),
-        group=-2,
-    )
-
     app.add_handler(CommandHandler("cta", comando_cta))
     app.add_handler(CommandHandler("config_cta", configurar_cta))
     app.add_handler(
@@ -2385,7 +2232,8 @@ if __name__ == "__main__":
     )
 
     print("Bot rodando...")
-    print("Plataformas: Instagram | TikTok | Facebook | Twitter/X | Pinterest")
+    print("Plataformas: Instagram (fotos/carrosséis via Instaloader) | TikTok | Facebook | Twitter/X | Pinterest")
+    print("Instagram autenticado: " + ("sim" if os.getenv("INSTAGRAM_SESSIONID") else "não (modo público)"))
 
     app.run_polling(
         drop_pending_updates=True
