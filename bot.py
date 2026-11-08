@@ -70,6 +70,38 @@ videos_para_analisar = {}
 # CTAs por perfil, guardadas separadamente para sobreviver a reinícios.
 CTA_CONFIG_PATH = Path(os.getenv("CTA_CONFIG_PATH", str(Path(__file__).with_name("ctas.json"))))
 
+# Administradores adicionais guardados no volume persistente.
+ADMINS_CONFIG_PATH = Path(
+    os.getenv("ADMINS_CONFIG_PATH", str(CTA_CONFIG_PATH.with_name("admins.json")))
+)
+
+
+def carregar_admins():
+    try:
+        with open(ADMINS_CONFIG_PATH, "r", encoding="utf-8") as arquivo:
+            dados = json.load(arquivo)
+        if not isinstance(dados, list):
+            return set()
+        return {int(item) for item in dados if str(item).isdigit() and int(item) > 0}
+    except (OSError, ValueError, TypeError):
+        return set()
+
+
+def guardar_admins():
+    ADMINS_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporario = ADMINS_CONFIG_PATH.with_suffix(ADMINS_CONFIG_PATH.suffix + ".tmp")
+    with open(temporario, "w", encoding="utf-8") as arquivo:
+        json.dump(sorted(admins_ids), arquivo, ensure_ascii=False, indent=2)
+    temporario.replace(ADMINS_CONFIG_PATH)
+
+
+admins_ids = carregar_admins()
+
+
+def eh_admin(user_id):
+    return user_id == ADMIN_ID or user_id in admins_ids
+
+
 CATEGORIAS_CTA = {
     "crescimento": {
         "label": "📈 Crescimento (Seguir)",
@@ -331,12 +363,144 @@ async def editar_prompt_cta(context, chat_id, user_data, texto, **kwargs):
 
 
 async def configurar_menu(app):
+    # Comandos administrativos de CTA não aparecem no menu público.
     comandos = [
         BotCommand("language", "🌍 Mudar idioma"),
-        BotCommand("cta", "📋 Painel profissional de CTAs"),
-        BotCommand("config_cta", "⚙️ Criar nova CTA por perfil"),
     ]
     await app.bot.set_my_commands(comandos)
+
+
+# =========================================================
+# GESTÃO DE MEMBROS ADMINISTRADORES (SÓ O ADMIN PRINCIPAL)
+# =========================================================
+
+def teclado_admins():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Adicionar novo membro", callback_data="admins_adicionar")],
+        [InlineKeyboardButton("👥 Ver membros", callback_data="admins_listar")],
+        [InlineKeyboardButton("➖ Remover membro", callback_data="admins_remover")],
+        [InlineKeyboardButton("Fechar", callback_data="admins_fechar")],
+    ])
+
+
+def texto_lista_admins():
+    linhas = ["👥 **Membros com acesso premium**", "", f"👑 Admin principal: `{ADMIN_ID}`"]
+    if admins_ids:
+        linhas.extend(["", *[f"• `{uid}`" for uid in sorted(admins_ids)]])
+    else:
+        linhas.extend(["", "Ainda não adicionaste nenhum membro."])
+    return "\\n".join(linhas)
+
+
+async def painel_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await apagar_comando(update)
+        return
+    await apagar_comando(update)
+    anterior = context.user_data.get("admins_panel_message_id")
+    if anterior:
+        try:
+            await context.bot.delete_message(chat_id=update.effective_chat.id, message_id=anterior)
+        except Exception:
+            pass
+    mensagem = await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=texto_lista_admins(),
+        parse_mode="Markdown",
+        reply_markup=teclado_admins(),
+    )
+    context.user_data["admins_panel_message_id"] = mensagem.message_id
+
+
+async def callbacks_admins(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if update.effective_user.id != ADMIN_ID:
+        await query.answer("Apenas o administrador principal pode gerir membros.", show_alert=True)
+        return
+    await query.answer()
+    data = query.data or ""
+
+    if data == "admins_adicionar":
+        context.user_data["aguardando_admin_id"] = "adicionar"
+        await query.edit_message_text(
+            "➕ **Adicionar membro**\\n\\nEnvia agora o ID numérico do Telegram dessa pessoa.",
+            parse_mode="Markdown",
+        )
+    elif data == "admins_remover":
+        context.user_data["aguardando_admin_id"] = "remover"
+        await query.edit_message_text(
+            "➖ **Remover membro**\\n\\nEnvia o ID numérico do membro que queres remover.",
+            parse_mode="Markdown",
+        )
+    elif data == "admins_listar":
+        await query.edit_message_text(
+            texto_lista_admins(), parse_mode="Markdown", reply_markup=teclado_admins()
+        )
+    elif data == "admins_fechar":
+        context.user_data.pop("aguardando_admin_id", None)
+        context.user_data.pop("admins_panel_message_id", None)
+        await query.edit_message_text("Painel de membros fechado.")
+
+
+async def receber_id_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    acao = context.user_data.get("aguardando_admin_id")
+    if not acao or update.effective_user.id != ADMIN_ID:
+        return
+
+    texto = (update.message.text or "").strip()
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    if not texto.isdigit() or int(texto) <= 0:
+        await resposta_temporaria(update, context, "❌ ID inválido. Envia apenas números.")
+        raise ApplicationHandlerStop
+
+    user_id = int(texto)
+    if user_id == ADMIN_ID:
+        resultado = "ℹ️ Esse ID já é o administrador principal."
+    elif acao == "adicionar":
+        if user_id in admins_ids:
+            resultado = "ℹ️ Esse membro já tem acesso premium."
+        else:
+            admins_ids.add(user_id)
+            try:
+                guardar_admins()
+                resultado = f"✅ O ID `{user_id}` foi adicionado aos membros premium."
+            except OSError as erro:
+                admins_ids.discard(user_id)
+                print(f"Erro ao guardar membros administradores: {erro}")
+                resultado = "❌ Não consegui guardar a alteração. Verifica o volume persistente."
+    else:
+        if user_id not in admins_ids:
+            resultado = "ℹ️ Esse ID não está na lista de membros."
+        else:
+            admins_ids.remove(user_id)
+            try:
+                guardar_admins()
+                resultado = f"✅ O ID `{user_id}` foi removido dos membros premium."
+            except OSError as erro:
+                admins_ids.add(user_id)
+                print(f"Erro ao guardar membros administradores: {erro}")
+                resultado = "❌ Não consegui guardar a alteração. Verifica o volume persistente."
+
+    context.user_data.pop("aguardando_admin_id", None)
+    mensagem_id = context.user_data.get("admins_panel_message_id")
+    if mensagem_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=mensagem_id,
+                text=resultado + "\\n\\n" + texto_lista_admins(),
+                parse_mode="Markdown",
+                reply_markup=teclado_admins(),
+            )
+        except Exception:
+            await resposta_temporaria(update, context, resultado)
+    else:
+        await resposta_temporaria(update, context, resultado)
+    raise ApplicationHandlerStop
 
 
 # =========================================================
@@ -827,7 +991,7 @@ async def analisar_texto_video(update: Update, context: ContextTypes.DEFAULT_TYP
     idioma = obter_idioma(user_id)
     t = TEXTOS[idioma]
 
-    if user_id != ADMIN_ID:
+    if not eh_admin(user_id):
         await query.answer(t["rewrite_private"], show_alert=True)
         return
 
@@ -955,7 +1119,7 @@ async def iniciar_traducao_extraido(update: Update, context: ContextTypes.DEFAUL
     idioma = obter_idioma(user_id)
     t = TEXTOS[idioma]
 
-    if user_id != ADMIN_ID:
+    if not eh_admin(user_id):
         await query.answer(t["rewrite_private"], show_alert=True)
         return
 
@@ -995,7 +1159,7 @@ async def executar_traducao_extraido(update: Update, context: ContextTypes.DEFAU
     idioma_usuario = obter_idioma(user_id)
     t = TEXTOS[idioma_usuario]
 
-    if user_id != ADMIN_ID:
+    if not eh_admin(user_id):
         await query.answer(t["rewrite_private"], show_alert=True)
         return
 
@@ -1090,7 +1254,7 @@ async def recriar_legenda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = update.effective_user.id
 
-    if user_id != ADMIN_ID:
+    if not eh_admin(user_id):
         idioma = obter_idioma(user_id)
         await query.answer(TEXTOS[idioma]["rewrite_private"], show_alert=True)
         return
@@ -1139,7 +1303,7 @@ async def gerar_legenda_recriada(update: Update, context: ContextTypes.DEFAULT_T
     idioma_usuario = obter_idioma(user_id)
     t = TEXTOS[idioma_usuario]
 
-    if user_id != ADMIN_ID:
+    if not eh_admin(user_id):
         await query.answer(t["rewrite_private"], show_alert=True)
         return
 
@@ -1975,7 +2139,7 @@ async def download_video(
         # =====================================================
         # BOTÕES PRIVADOS DE IA PARA O ADMINISTRADOR
         # =====================================================
-        if update.effective_user.id == ADMIN_ID:
+        if eh_admin(update.effective_user.id):
             botoes_admin = []
 
             if legenda:
@@ -2011,7 +2175,7 @@ async def download_video(
                     legenda,
                     reply_markup=InlineKeyboardMarkup(botoes_admin) if botoes_admin else None,
                 )
-                if update.effective_user.id == ADMIN_ID and 'legenda_id' in locals():
+                if eh_admin(update.effective_user.id) and 'legenda_id' in locals():
                     legendas_para_recriar[legenda_id]["caption_message_id"] = mensagem_legenda.message_id
             elif botoes_admin:
                 # Caso o vídeo não tenha legenda original na plataforma, envia o botão de analisar texto do vídeo
@@ -2132,6 +2296,20 @@ if __name__ == "__main__":
 
     app.add_handler(
         CommandHandler("manutencao", manutencao)
+    )
+
+    app.add_handler(CommandHandler("admins", painel_admins))
+    app.add_handler(
+        CallbackQueryHandler(
+            callbacks_admins,
+            pattern=r"^admins_(adicionar|remover|listar|fechar)$",
+        )
+    )
+
+    # Só intercepta texto quando o admin principal está a inserir um ID.
+    app.add_handler(
+        MessageHandler(filters.TEXT & (~filters.COMMAND), receber_id_admin),
+        group=-2,
     )
 
     app.add_handler(CommandHandler("cta", comando_cta))
