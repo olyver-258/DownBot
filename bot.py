@@ -118,9 +118,9 @@ ctas_perfis = carregar_ctas()
 
 TEXTOS = {
     "pt": {
-        "start": "🌍 Escolha o seu idioma:",
+        "start": "🌍 Escolha seu idioma:",
         "welcome": (
-            "✅ Idioma definido para Português.\n\n"
+            "✅ Idioma definido para Português (Brasil).\n\n"
             "Envie um link do Instagram, TikTok, Facebook, Twitter/X ou Pinterest."
         ),
         "invalid": (
@@ -156,8 +156,8 @@ TEXTOS = {
         "rewrite_not_found": "❌ Não encontrei uma legenda para recriar.",
         "rewrite_unavailable": "❌ A IA está temporariamente indisponível. Tente novamente daqui a pouco.",
         "rewrite_private": "Esta função é privada.",
-        "rewrite_language": "português",
-        "rewrite_language_prompt": "🌍 Em que idioma queres recriar a legenda?",
+        "rewrite_language": "Português do Brasil",
+        "rewrite_language_prompt": "🌍 Em qual idioma deseja recriar a legenda?",
         "analyze_video_button": "🔍 Extrair legenda do vídeo",
         "analyzing_video": "🔍 Extraindo a legenda do primeiro frame... aguarde.",
         "video_text_done": "📝 Legenda identificada:",
@@ -165,10 +165,10 @@ TEXTOS = {
         "video_not_found": "❌ Não encontrei os dados deste vídeo para analisar.",
         "translate_extracted_button": "TRADUZIR",
         "rewrite_extracted_button": "REESCREVER",
-        "translate_prompt": "🌍 Escolhe o idioma:",
-        "translating_text": "A traduzir...",
+        "translate_prompt": "🌍 Escolha o idioma:",
+        "translating_text": "Traduzindo...",
         "translated_done": "🌐 Legenda do vídeo traduzida:",
-        "language": "🌍 Escolha o seu idioma:",
+        "language": "🌍 Escolha seu idioma:",
     },
 
     "en": {
@@ -234,7 +234,7 @@ TEXTOS = {
 def teclado_idiomas():
     return ReplyKeyboardMarkup(
         [
-            ["🇵🇹 Português", "🇬🇧 English"],
+            ["🇧🇷 Português (Brasil)", "🇺🇸 English (US)"],
         ],
         resize_keyboard=True,
         one_time_keyboard=True,
@@ -420,7 +420,7 @@ async def _mostrar_menu_idioma(update, context):
 
     mensagem = await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text="🌍 Escolha o seu idioma / Choose your language:",
+        text="🌍 Escolha seu idioma / Choose your language:",
         reply_markup=teclado_idiomas(),
     )
     context.user_data["menu_idioma_message_id"] = mensagem.message_id
@@ -442,8 +442,8 @@ async def selecionar_idioma(
     user_id = update.effective_user.id
 
     idiomas = {
-        "🇵🇹 Português": "pt",
-        "🇬🇧 English": "en",
+        "🇧🇷 Português (Brasil)": "pt",
+        "🇺🇸 English (US)": "en",
     }
 
     idioma = idiomas.get(escolha)
@@ -976,8 +976,8 @@ async def iniciar_traducao_extraido(update: Update, context: ContextTypes.DEFAUL
 
     teclado = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🇵🇹 Português", callback_data=f"traduzir_idioma:pt:{legenda_id}"),
-            InlineKeyboardButton("🇬🇧 English", callback_data=f"traduzir_idioma:en:{legenda_id}"),
+            InlineKeyboardButton("🇧🇷 Português (Brasil)", callback_data=f"traduzir_idioma:pt:{legenda_id}"),
+            InlineKeyboardButton("🇺🇸 English (US)", callback_data=f"traduzir_idioma:en:{legenda_id}"),
         ]
     ])
 
@@ -1008,7 +1008,10 @@ async def executar_traducao_extraido(update: Update, context: ContextTypes.DEFAU
         await query.edit_message_text("Idioma inválido.")
         return
 
-    idioma_destino = {"pt": "português", "en": "English"}[partes[1]]
+    idioma_destino = {
+        "pt": "português brasileiro (Brasil), com vocabulário, ortografia e expressões naturais do Brasil",
+        "en": "American English (United States), using US spelling, vocabulary and natural expressions",
+    }[partes[1]]
     legenda_id = partes[2]
     dados_legenda = legendas_para_recriar.get(legenda_id)
 
@@ -1114,8 +1117,8 @@ async def recriar_legenda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     teclado_idioma_legenda = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🇵🇹 Português", callback_data=f"recriar_idioma:pt:{legenda_id}"),
-            InlineKeyboardButton("🇬🇧 English", callback_data=f"recriar_idioma:en:{legenda_id}"),
+            InlineKeyboardButton("🇧🇷 Português (Brasil)", callback_data=f"recriar_idioma:pt:{legenda_id}"),
+            InlineKeyboardButton("🇺🇸 English (US)", callback_data=f"recriar_idioma:en:{legenda_id}"),
         ]
     ])
     idioma_usuario = obter_idioma(user_id)
@@ -1150,7 +1153,10 @@ async def gerar_legenda_recriada(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     idioma_codigo = partes[1]
-    idioma_resposta = {"pt": "português", "en": "English"}[idioma_codigo]
+    idioma_resposta = {
+        "pt": "Português do Brasil (português brasileiro, com vocabulário e expressões naturais do Brasil)",
+        "en": "American English (United States, with US spelling and expressions)",
+    }[idioma_codigo]
     legenda_id = partes[2]
 
     if partes[0] == "recriar_idioma":
@@ -1164,7 +1170,7 @@ async def gerar_legenda_recriada(update: Update, context: ContextTypes.DEFAULT_T
         for perfil_id, perfil in perfis_ordenados:
             nome = str(perfil.get("nome", "Perfil"))[:28]
             idioma_cta = str(perfil.get("idioma", "pt")).upper()
-            bandeira = "🇵🇹" if idioma_cta == "PT" else "🇬🇧"
+            bandeira = "🇧🇷" if idioma_cta == "PT" else "🇺🇸"
             modo_icone = "🤝" if perfil.get("modo") == "contextual" else "📌"
             modo_curto = "Contextual" if perfil.get("modo") == "contextual" else "Fixa"
             botoes.append([InlineKeyboardButton(
@@ -1350,8 +1356,9 @@ def _montar_painel_ctas():
     botoes = []
     for perfil_id, perfil in ctas_perfis.items():
         nome = str(perfil.get("nome", "Perfil"))
-        idioma = str(perfil.get("idioma", "pt")).upper()
-        bandeira = "🇵🇹" if idioma == "PT" else "🇬🇧"
+        idioma_codigo = str(perfil.get("idioma", "pt")).lower()
+        idioma = "PT-BR" if idioma_codigo == "pt" else "EN-US"
+        bandeira = "🇧🇷" if idioma_codigo == "pt" else "🇺🇸"
         modo = "🤝 Contextual" if perfil.get("modo") == "contextual" else "📌 Fixa"
         linhas.append(f"• **{escape_markdown(nome)}** · {bandeira} {idioma} · {modo}")
         botoes.append([
@@ -1450,8 +1457,8 @@ async def receber_config_cta(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data["cta_nova"] = {"nome": nome_limpo}
         context.user_data["configurando_cta"] = "idioma"
         teclado = InlineKeyboardMarkup([[
-            InlineKeyboardButton("🇵🇹 Português", callback_data="cta_idioma:pt"),
-            InlineKeyboardButton("🇬🇧 English", callback_data="cta_idioma:en"),
+            InlineKeyboardButton("🇧🇷 Português (Brasil)", callback_data="cta_idioma:pt"),
+            InlineKeyboardButton("🇺🇸 English (US)", callback_data="cta_idioma:en"),
         ]])
         await editar_prompt_cta(
             context, update.effective_chat.id, context.user_data,
@@ -1599,7 +1606,7 @@ async def callbacks_cta(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(
                 f"✅ **CTA profissional configurada com sucesso!**\n\n"
                 f"👤 **Perfil:** @{escape_markdown(perfil['nome'])}\n"
-                f"🌍 **Idioma:** {escape_markdown(perfil['idioma'].upper())}\n"
+                f"🌍 **Idioma:** {'Português (Brasil)' if perfil['idioma'] == 'pt' else 'English (US)'}\n"
                 f"⚙️ **Inserção:** {modo_str}\n"
                 f"📝 **Texto:** {escape_markdown(perfil['texto'])}\n\n"
                 "Gerencie todas as suas CTAs em /cta.",
@@ -2148,7 +2155,7 @@ if __name__ == "__main__":
     app.add_handler(
         MessageHandler(
             filters.Regex(
-                r"^(🇵🇹 Português|🇬🇧 English)$"
+                r"^(🇧🇷 Português \(Brasil\)|🇺🇸 English \(US\))$"
             ),
             selecionar_idioma,
         )
