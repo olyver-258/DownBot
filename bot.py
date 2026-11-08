@@ -20,6 +20,8 @@ from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     BotCommand,
+    BotCommandScopeDefault,
+    BotCommandScopeChat,
     ReplyParameters,
     ReactionTypeEmoji,
     InputMediaPhoto,
@@ -99,6 +101,19 @@ admins_ids = carregar_admins()
 
 
 def eh_admin(user_id):
+    # Recarrega a lista do volume para que alterações feitas no painel
+    # sejam reconhecidas mesmo após reinícios ou por outros processos.
+    try:
+        admins_ids.clear()
+        admins_ids.update(carregar_admins())
+    except Exception as erro:
+        print(f"Erro ao atualizar lista de admins: {erro}")
+
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return False
+
     return user_id == ADMIN_ID or user_id in admins_ids
 
 
@@ -363,11 +378,31 @@ async def editar_prompt_cta(context, chat_id, user_data, texto, **kwargs):
 
 
 async def configurar_menu(app):
-    # Comandos administrativos de CTA não aparecem no menu público.
-    comandos = [
+    # Menu público: comandos disponíveis para qualquer utilizador.
+    comandos_publicos = [
         BotCommand("language", "🌍 Mudar idioma"),
+        BotCommand("meuid", "🆔 Ver meu ID do Telegram"),
     ]
-    await app.bot.set_my_commands(comandos)
+    await app.bot.set_my_commands(
+        comandos_publicos,
+        scope=BotCommandScopeDefault(),
+    )
+
+    # Menu exclusivo do administrador principal. O Telegram permite
+    # comandos diferentes por conversa, sem esconder os comandos do dono.
+    if ADMIN_ID:
+        comandos_principais = comandos_publicos + [
+            BotCommand("admins", "👥 Gerir membros premium"),
+            BotCommand("cta", "📣 Gerir CTAs"),
+            BotCommand("config_cta", "⚙️ Configurar CTAs"),
+            BotCommand("ctacancelar", "✖️ Cancelar configuração de CTA"),
+            BotCommand("stats", "📊 Estatísticas"),
+            BotCommand("manutencao", "🛠️ Manutenção"),
+        ]
+        await app.bot.set_my_commands(
+            comandos_principais,
+            scope=BotCommandScopeChat(chat_id=ADMIN_ID),
+        )
 
 
 # =========================================================
@@ -384,6 +419,8 @@ def teclado_admins():
 
 
 def texto_lista_admins():
+    admins_ids.clear()
+    admins_ids.update(carregar_admins())
     linhas = ["👥 **Membros com acesso premium**", "", f"👑 Admin principal: `{ADMIN_ID}`"]
     if admins_ids:
         linhas.extend(["", *[f"• `{uid}`" for uid in sorted(admins_ids)]])
