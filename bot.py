@@ -57,6 +57,53 @@ gemini_client = (
     else None
 )
 
+# Modelos Gemini disponíveis no painel administrativo.
+# Evitamos modelos antigos cuja disponibilidade pode variar entre projectos.
+MODELOS_GEMINI = {
+    "gemini-3.1-flash-lite": "⚡ Gemini 3.1 Flash-Lite",
+    "gemini-3.5-flash-lite": "🚀 Gemini 3.5 Flash-Lite",
+    "gemini-3.8-flash": "🧠 Gemini 3.8 Flash",
+}
+GEMINI_CONFIG_PATH = Path(
+    os.getenv("GEMINI_CONFIG_PATH", str(Path(__file__).with_name("gemini_config.json")))
+)
+
+
+def carregar_modelo_gemini():
+    try:
+        with open(GEMINI_CONFIG_PATH, "r", encoding="utf-8") as arquivo:
+            dados = json.load(arquivo)
+        modelo = dados.get("model") if isinstance(dados, dict) else None
+        return modelo if modelo in MODELOS_GEMINI else "gemini-3.1-flash-lite"
+    except (OSError, ValueError, TypeError):
+        return "gemini-3.1-flash-lite"
+
+
+def guardar_modelo_gemini(modelo):
+    if modelo not in MODELOS_GEMINI:
+        raise ValueError("Modelo Gemini não permitido.")
+    GEMINI_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    caminho_temporario = GEMINI_CONFIG_PATH.with_suffix(GEMINI_CONFIG_PATH.suffix + ".tmp")
+    with open(caminho_temporario, "w", encoding="utf-8") as arquivo:
+        json.dump({"model": modelo}, arquivo, ensure_ascii=False, indent=2)
+    caminho_temporario.replace(GEMINI_CONFIG_PATH)
+
+
+gemini_modelo_atual = carregar_modelo_gemini()
+
+
+def obter_modelo_gemini():
+    """Devolve o modelo seleccionado pelo administrador."""
+    return gemini_modelo_atual
+
+
+def eh_admin_principal(user_id):
+    """A alteração do modelo fica reservada ao ADMIN_ID principal."""
+    try:
+        return ADMIN_ID > 0 and int(user_id) == ADMIN_ID
+    except (TypeError, ValueError):
+        return False
+
 # Telegram Bot API normalmente limita uploads de bots.
 # Mantemos margem de segurança.
 MAX_FILE_SIZE = 49 * 1024 * 1024
@@ -178,6 +225,12 @@ def comandos_premium():
         BotCommand("extrair", "🔍 Extrair texto de uma imagem"),
         BotCommand("cta", "📣 Gerir minhas CTAs"),
         BotCommand("config_cta", "⚙️ Criar uma CTA"),
+    ]
+
+
+def comandos_administrador():
+    return comandos_premium() + [
+        BotCommand("modelos", "🤖 Alterar modelo Gemini"),
     ]
 
 
@@ -405,10 +458,10 @@ async def configurar_menu(app):
         scope=BotCommandScopeDefault(),
     )
 
-    # Menu completo apenas para o administrador principal.
+    # O administrador principal recebe também o comando de modelos Gemini.
     if ADMIN_ID:
         await app.bot.set_my_commands(
-            comandos_premium(),
+            comandos_administrador(),
             scope=BotCommandScopeChat(chat_id=ADMIN_ID),
         )
 
@@ -430,6 +483,77 @@ async def meu_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         update,
         context,
         f"🆔 Seu Telegram User ID é: {update.effective_user.id}",
+    )
+
+
+def teclado_modelos_gemini():
+    botoes = []
+    for modelo, nome in MODELOS_GEMINI.items():
+        marcador = "✅ " if modelo == obter_modelo_gemini() else ""
+        botoes.append([
+            InlineKeyboardButton(
+                marcador + nome,
+                callback_data=f"gemini_modelo:{modelo}",
+            )
+        ])
+    return InlineKeyboardMarkup(botoes)
+
+
+async def comando_modelos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Abre o painel privado para escolher o modelo Gemini usado pelo bot."""
+    await apagar_comando(update)
+    if not eh_admin_principal(update.effective_user.id):
+        await resposta_temporaria(update, context, "🔒 Apenas o administrador principal pode alterar o modelo Gemini.")
+        return
+
+    modelo = obter_modelo_gemini()
+    nome = MODELOS_GEMINI.get(modelo, modelo)
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=(
+            "🤖 **Configuração do Gemini**\n\n"
+            f"Modelo activo: **{nome}**\n\n"
+            "Escolhe o modelo que será usado no OCR de imagens, OCR de vídeos, "
+            "tradução e recriação de legendas."
+        ),
+        parse_mode="Markdown",
+        reply_markup=teclado_modelos_gemini(),
+    )
+
+
+async def selecionar_modelo_gemini(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global gemini_modelo_atual
+    query = update.callback_query
+
+    if not eh_admin_principal(update.effective_user.id):
+        await query.answer("🔒 Apenas o administrador principal pode alterar o modelo.", show_alert=True)
+        return
+
+    modelo = (query.data or "").split(":", 1)[-1]
+    if modelo not in MODELOS_GEMINI:
+        await query.answer("Modelo inválido.", show_alert=True)
+        return
+
+    modelo_anterior = gemini_modelo_atual
+    try:
+        guardar_modelo_gemini(modelo)
+        gemini_modelo_atual = modelo
+    except Exception as erro:
+        gemini_modelo_atual = modelo_anterior
+        print(f"Erro ao guardar modelo Gemini: {erro}")
+        await query.answer("Não foi possível guardar a alteração.", show_alert=True)
+        return
+
+    await query.answer("Modelo actualizado!")
+    nome = MODELOS_GEMINI[modelo]
+    await query.edit_message_text(
+        text=(
+            "🤖 **Configuração do Gemini**\n\n"
+            f"Modelo activo: **{nome}**\n\n"
+            "A alteração foi guardada e será usada nas próximas operações de IA."
+        ),
+        parse_mode="Markdown",
+        reply_markup=teclado_modelos_gemini(),
     )
 
 
@@ -820,7 +944,7 @@ REGRAS:
 - Responda apenas com a legenda extraída, sem introduções ou explicações."""
 
         resposta = gemini_client.models.generate_content(
-            model="gemini-3.1-flash-lite",
+            model=obter_modelo_gemini(),
             contents=[arquivo_remoto, prompt_ocr],
         )
         return (resposta.text or "").strip()
@@ -912,7 +1036,7 @@ Responda somente com o texto extraído, sem introduções ou explicações."""
 
         resposta = await asyncio.to_thread(
             gemini_client.models.generate_content,
-            model="gemini-3.1-flash-lite",
+            model=obter_modelo_gemini(),
             contents=[arquivo_remoto, prompt],
         )
         texto_extraido = (resposta.text or "").strip()
@@ -1176,7 +1300,7 @@ TEXTO PARA TRADUZIR:
     try:
         resposta = await asyncio.to_thread(
             gemini_client.models.generate_content,
-            model="gemini-3.1-flash-lite",
+            model=obter_modelo_gemini(),
             contents=prompt,
         )
         texto_traduzido = limpar_texto_ia(resposta.text)
@@ -1406,7 +1530,7 @@ LEGENDA ORIGINAL:
         try:
             resposta = await asyncio.to_thread(
                 gemini_client.models.generate_content,
-                model="gemini-3.1-flash-lite",
+                model=obter_modelo_gemini(),
                 contents=prompt,
             )
             nova_legenda = limpar_texto_ia(resposta.text)
@@ -2261,6 +2385,14 @@ if __name__ == "__main__":
 
     app.add_handler(
         CommandHandler("meuid", meu_id)
+    )
+
+    app.add_handler(CommandHandler("modelos", comando_modelos))
+    app.add_handler(
+        CallbackQueryHandler(
+            selecionar_modelo_gemini,
+            pattern=r"^gemini_modelo:",
+        )
     )
 
     app.add_handler(CommandHandler("extrair", comando_extrair_imagem))
